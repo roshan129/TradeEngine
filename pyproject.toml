@@ -14,7 +14,10 @@ authors = [
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
-  "pydantic-settings>=2.4.0,<3.0.0"
+  "pydantic-settings>=2.4.0,<3.0.0",
+  "requests>=2.32.0,<3.0.0",
+  "pandas>=2.2.0,<3.0.0",
+  "python-dotenv>=1.0.0,<2.0.0"
 ]
 
 [project.optional-dependencies]
@@ -47,4 +50,3 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-
