@@ -20,7 +20,7 @@ class UpstoxClient:
     def __init__(
         self,
         auth: UpstoxAuth,
-        base_url: str = "https://api.upstox.com/v2",
+        base_url: str = "https://api.upstox.com/v3",
         timeout_seconds: int = 15,
         max_retries: int = 3,
         backoff_seconds: float = 1.0,
@@ -50,18 +50,16 @@ class UpstoxClient:
             "Accept": "application/json",
         }
 
-        path = f"/historical-candle/{instrument_key}/{interval}"
-        params = {
-            "from_datetime": from_datetime.isoformat(),
-            "to_datetime": to_datetime.isoformat(),
-        }
+        unit, interval_value = self._parse_interval(interval)
+        to_date = to_datetime.date().isoformat()
+        from_date = from_datetime.date().isoformat()
+        path = f"/historical-candle/{instrument_key}/{unit}/{interval_value}/{to_date}/{from_date}"
 
         for attempt in range(1, self._max_retries + 1):
             try:
                 response = self._session.get(
                     f"{self._base_url}{path}",
                     headers=headers,
-                    params=params,
                     timeout=self._timeout_seconds,
                 )
             except requests.Timeout as exc:
@@ -120,3 +118,21 @@ class UpstoxClient:
     def _backoff(self, attempt: int) -> None:
         wait_seconds = self._backoff_seconds * (2 ** (attempt - 1))
         time.sleep(wait_seconds)
+
+    @staticmethod
+    def _parse_interval(interval: str) -> tuple[str, str]:
+        if interval.endswith("minute"):
+            count = interval.replace("minute", "")
+            if count.isdigit():
+                return ("minutes", count)
+        if interval.endswith("hour"):
+            count = interval.replace("hour", "")
+            if count.isdigit():
+                return ("hours", count)
+        if interval == "day":
+            return ("days", "1")
+        if interval == "week":
+            return ("weeks", "1")
+        if interval == "month":
+            return ("months", "1")
+        raise UpstoxClientError(f"Unsupported interval format: {interval}")

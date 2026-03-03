@@ -22,7 +22,11 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def run_historical_data_flow(auth_code: str | None = None, instrument_key: str | None = None) -> None:
+def run_historical_data_flow(
+    auth_code: str | None = None,
+    instrument_key: str | None = None,
+    ignore_market_hours: bool = False,
+) -> None:
     configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
 
@@ -57,9 +61,12 @@ def run_historical_data_flow(auth_code: str | None = None, instrument_key: str |
         raise ConfigError("Missing UPSTOX_INSTRUMENT_KEY (or pass --instrument-key)")
 
     service = HistoricalDataService(client=UpstoxClient(auth=auth))
-    candles = service.get_last_30_minutes_5min_candles(symbol=symbol)
+    if ignore_market_hours:
+        candles = service.get_last_trading_day_75_5min_candles_anytime(symbol=symbol)
+    else:
+        candles = service.get_last_500_5min_candles(symbol=symbol)
 
-    logger.info("Fetched %s candles for symbol=%s", len(candles), symbol)
+    logger.info("Fetched %s five-minute candles for symbol=%s", len(candles), symbol)
     for candle in candles:
         print(
             f"{candle.timestamp.isoformat()} | "
@@ -75,8 +82,17 @@ if __name__ == "__main__":
         dest="instrument_key",
         help="Upstox instrument key (e.g. NSE_EQ|INE002A01018)",
     )
+    parser.add_argument(
+        "--ignore-market-hours",
+        action="store_true",
+        help="Fetch candles even when market hours validation would block the request",
+    )
     args = parser.parse_args()
     try:
-        run_historical_data_flow(auth_code=args.auth_code, instrument_key=args.instrument_key)
+        run_historical_data_flow(
+            auth_code=args.auth_code,
+            instrument_key=args.instrument_key,
+            ignore_market_hours=args.ignore_market_hours,
+        )
     except (ConfigError, UpstoxAuthError, UpstoxClientError):
         logging.getLogger(__name__).exception("Historical data flow failed")
