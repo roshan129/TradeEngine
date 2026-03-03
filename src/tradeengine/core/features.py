@@ -34,6 +34,9 @@ class FeatureEngineer:
     MACD_FAST = 12
     MACD_SLOW = 26
     MACD_SIGNAL = 9
+    ATR_PERIOD = 14
+    BB_PERIOD = 20
+    BB_STD_MULTIPLIER = 2.0
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(df, pd.DataFrame):
@@ -122,7 +125,44 @@ class FeatureEngineer:
         return clean_df
 
     def add_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError
+        clean_df = self.prepare_base_dataframe(df)
+        clean_df = self._coerce_numeric_ohlcv(clean_df)
+
+        prev_close = self.safe_shift(clean_df["close"], periods=1)
+        tr_components = pd.concat(
+            [
+                clean_df["high"] - clean_df["low"],
+                (clean_df["high"] - prev_close).abs(),
+                (clean_df["low"] - prev_close).abs(),
+            ],
+            axis=1,
+        )
+        true_range = tr_components.max(axis=1)
+        clean_df["atr"] = true_range.ewm(
+            alpha=1 / self.ATR_PERIOD,
+            min_periods=self.ATR_PERIOD,
+            adjust=False,
+        ).mean()
+
+        rolling_mean = clean_df["close"].rolling(window=self.BB_PERIOD, min_periods=self.BB_PERIOD).mean()
+        rolling_std = clean_df["close"].rolling(window=self.BB_PERIOD, min_periods=self.BB_PERIOD).std(ddof=0)
+        upper_band = rolling_mean + (self.BB_STD_MULTIPLIER * rolling_std)
+        lower_band = rolling_mean - (self.BB_STD_MULTIPLIER * rolling_std)
+
+        bb_width = ((upper_band - lower_band) / rolling_mean).astype("float64")
+        bb_width = bb_width.replace([float("inf"), float("-inf")], pd.NA)
+        clean_df["bb_width"] = bb_width
+
+        clean_df["rolling_std"] = rolling_std.astype("float64")
+
+        finite_cols = ["atr", "bb_width", "rolling_std"]
+        inf_mask = clean_df[finite_cols].isin([float("inf"), float("-inf")]).any(axis=1)
+        if inf_mask.any():
+            msg = "Infinite values detected in volatility features"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        return clean_df
 
     def add_structure_features(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
