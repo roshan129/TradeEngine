@@ -28,6 +28,7 @@ class FeatureEngineer:
         "close",
         "volume",
     )
+    NUMERIC_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(df, pd.DataFrame):
@@ -69,7 +70,19 @@ class FeatureEngineer:
         return series.shift(periods)
 
     def add_trend_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError
+        clean_df = self.prepare_base_dataframe(df)
+        clean_df = self._coerce_numeric_ohlcv(clean_df)
+
+        close = clean_df["close"]
+        clean_df["ema20"] = close.ewm(span=20, adjust=False, min_periods=20).mean()
+        clean_df["ema50"] = close.ewm(span=50, adjust=False, min_periods=50).mean()
+        clean_df["ema200"] = close.ewm(span=200, adjust=False, min_periods=200).mean()
+
+        typical_price = (clean_df["high"] + clean_df["low"] + clean_df["close"]) / 3.0
+        tpv = typical_price * clean_df["volume"]
+        cumulative_volume = clean_df["volume"].cumsum()
+        clean_df["vwap"] = tpv.cumsum() / cumulative_volume
+        return clean_df
 
     def add_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
@@ -85,3 +98,16 @@ class FeatureEngineer:
 
     def full_feature_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
+
+    def _coerce_numeric_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
+        clean_df = df.copy(deep=True)
+        for col in self.NUMERIC_COLUMNS:
+            clean_df[col] = pd.to_numeric(clean_df[col], errors="coerce")
+
+        if clean_df[list(self.NUMERIC_COLUMNS)].isna().any().any():
+            msg = "Non-numeric OHLCV values found in feature input"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        clean_df[list(self.NUMERIC_COLUMNS)] = clean_df[list(self.NUMERIC_COLUMNS)].astype("float64")
+        return clean_df
