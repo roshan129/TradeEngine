@@ -39,6 +39,25 @@ class FeatureEngineer:
     BB_STD_MULTIPLIER = 2.0
     VOLUME_ROLLING_PERIOD = 20
     MIN_ROWS_FOR_FULL_FEATURES = 200
+    FINAL_FEATURE_COLUMNS: tuple[str, ...] = (
+        "ema20",
+        "ema50",
+        "ema200",
+        "vwap",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "roc",
+        "atr",
+        "bb_width",
+        "rolling_std",
+        "dist_ema20",
+        "dist_vwap",
+        "higher_high",
+        "lower_low",
+        "rolling_volume_avg",
+    )
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(df, pd.DataFrame):
@@ -218,7 +237,49 @@ class FeatureEngineer:
         return clean_df
 
     def full_feature_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError
+        clean_df = self.prepare_base_dataframe(df)
+        clean_df = self.add_trend_features(clean_df)
+        clean_df = self.add_momentum_features(clean_df)
+        clean_df = self.add_volatility_features(clean_df)
+        clean_df = self.add_structure_features(clean_df)
+        clean_df = self.remove_initial_nan_rows(clean_df)
+
+        missing_features = [col for col in self.FINAL_FEATURE_COLUMNS if col not in clean_df.columns]
+        if missing_features:
+            msg = f"Missing required engineered features: {', '.join(missing_features)}"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        if clean_df["timestamp"].duplicated().any():
+            msg = "Feature pipeline output contains duplicate timestamps"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        if not clean_df["timestamp"].is_monotonic_increasing:
+            msg = "Feature pipeline output timestamps are not sorted ascending"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        if clean_df.isna().any().any():
+            msg = "Feature pipeline output contains NaN values"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        numeric_cols = [*self.NUMERIC_COLUMNS, *self.FINAL_FEATURE_COLUMNS]
+        numeric_cols = [col for col in numeric_cols if col not in {"higher_high", "lower_low"}]
+        inf_mask = clean_df[numeric_cols].isin([float("inf"), float("-inf")]).any(axis=1)
+        if inf_mask.any():
+            msg = "Feature pipeline output contains infinite values"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        if str(clean_df["higher_high"].dtype) != "bool" or str(clean_df["lower_low"].dtype) != "bool":
+            msg = "Feature flag columns must be bool dtype"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        logger.info("[FEATURE_INFO] Full feature pipeline produced %s rows", len(clean_df))
+        return clean_df
 
     def _coerce_numeric_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
         clean_df = df.copy(deep=True)
