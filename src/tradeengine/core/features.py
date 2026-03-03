@@ -37,6 +37,7 @@ class FeatureEngineer:
     ATR_PERIOD = 14
     BB_PERIOD = 20
     BB_STD_MULTIPLIER = 2.0
+    VOLUME_ROLLING_PERIOD = 20
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(df, pd.DataFrame):
@@ -165,7 +166,36 @@ class FeatureEngineer:
         return clean_df
 
     def add_structure_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError
+        clean_df = self.prepare_base_dataframe(df)
+        clean_df = self._coerce_numeric_ohlcv(clean_df)
+
+        if "ema20" not in clean_df.columns or "vwap" not in clean_df.columns:
+            clean_df = self.add_trend_features(clean_df)
+
+        clean_df["dist_ema20"] = clean_df["close"] - clean_df["ema20"]
+        clean_df["dist_vwap"] = clean_df["close"] - clean_df["vwap"]
+
+        prev_high = self.safe_shift(clean_df["high"], periods=1)
+        prev_low = self.safe_shift(clean_df["low"], periods=1)
+        clean_df["higher_high"] = (clean_df["high"] > prev_high).fillna(False)
+        clean_df["lower_low"] = (clean_df["low"] < prev_low).fillna(False)
+
+        clean_df["rolling_volume_avg"] = clean_df["volume"].rolling(
+            window=self.VOLUME_ROLLING_PERIOD,
+            min_periods=self.VOLUME_ROLLING_PERIOD,
+        ).mean()
+
+        inf_mask = clean_df[["dist_ema20", "dist_vwap", "rolling_volume_avg"]].isin(
+            [float("inf"), float("-inf")]
+        )
+        if inf_mask.any().any():
+            msg = "Infinite values detected in structure features"
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        clean_df["higher_high"] = clean_df["higher_high"].astype("bool")
+        clean_df["lower_low"] = clean_df["lower_low"].astype("bool")
+        return clean_df
 
     def remove_initial_nan_rows(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
