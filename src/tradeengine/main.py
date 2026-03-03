@@ -62,7 +62,7 @@ def run_historical_data_flow(
 
     service = HistoricalDataService(client=UpstoxClient(auth=auth))
     if ignore_market_hours:
-        candles = service.get_last_trading_day_75_5min_candles_anytime(symbol=symbol)
+        candles = service.get_last_500_5min_candles_anytime(symbol=symbol)
     else:
         candles = service.get_last_500_5min_candles(symbol=symbol)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from tradeengine.market_data.service import HistoricalDataService
 
@@ -23,11 +23,10 @@ class DummyClient:
 class ManyCandlesClient:
     def fetch_historical_candles(self, **_: object) -> dict[str, object]:
         candles = []
-        for i in range(80):
-            minute = 15 + (i * 5)
-            hour = 9 + (minute // 60)
-            minute = minute % 60
-            candles.append([f"2026-03-02T{hour:02d}:{minute:02d}:00Z", 10.0, 11.0, 9.0, 10.5, 100])
+        start = datetime(2026, 2, 20, 3, 45, tzinfo=UTC)
+        for i in range(600):
+            ts = start + timedelta(minutes=5 * i)
+            candles.append([ts.isoformat().replace("+00:00", "Z"), 10.0, 11.0, 9.0, 10.5, 100])
         return {"data": {"candles": candles}}
 
 
@@ -51,7 +50,7 @@ def test_anytime_method_bypasses_market_hours(monkeypatch) -> None:
     assert client.called is True
 
 
-def test_anytime_method_returns_latest_75_candles() -> None:
+def test_anytime_method_uses_client_response_without_market_hours_gate() -> None:
     service = HistoricalDataService(client=ManyCandlesClient(), enforce_market_hours=True)
-    candles = service.get_last_trading_day_75_5min_candles_anytime(symbol="NSE_EQ|DUMMY")
-    assert len(candles) == 75
+    candles = service.get_last_500_5min_candles_anytime(symbol="NSE_EQ|DUMMY")
+    assert len(candles) == 500
