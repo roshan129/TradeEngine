@@ -38,6 +38,7 @@ class FeatureEngineer:
     BB_PERIOD = 20
     BB_STD_MULTIPLIER = 2.0
     VOLUME_ROLLING_PERIOD = 20
+    MIN_ROWS_FOR_FULL_FEATURES = 200
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(df, pd.DataFrame):
@@ -198,7 +199,23 @@ class FeatureEngineer:
         return clean_df
 
     def remove_initial_nan_rows(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError
+        clean_df = self.prepare_base_dataframe(df)
+
+        if len(clean_df) < self.MIN_ROWS_FOR_FULL_FEATURES:
+            msg = (
+                f"Insufficient rows for feature warmup: received {len(clean_df)}, "
+                f"need at least {self.MIN_ROWS_FOR_FULL_FEATURES}"
+            )
+            logger.error("[FEATURE_ERROR] %s", msg)
+            raise FeatureEngineeringError(msg)
+
+        nan_rows = clean_df.isna().any(axis=1)
+        removed_count = int(nan_rows.sum())
+        if removed_count > 0:
+            logger.info("[FEATURE_INFO] Removed %s warmup rows containing NaN", removed_count)
+
+        clean_df = clean_df.dropna().reset_index(drop=True)
+        return clean_df
 
     def full_feature_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
