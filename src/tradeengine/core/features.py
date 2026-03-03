@@ -29,6 +29,11 @@ class FeatureEngineer:
         "volume",
     )
     NUMERIC_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
+    RSI_PERIOD = 14
+    ROC_PERIOD = 12
+    MACD_FAST = 12
+    MACD_SLOW = 26
+    MACD_SIGNAL = 9
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(df, pd.DataFrame):
@@ -85,7 +90,36 @@ class FeatureEngineer:
         return clean_df
 
     def add_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        raise NotImplementedError
+        clean_df = self.prepare_base_dataframe(df)
+        clean_df = self._coerce_numeric_ohlcv(clean_df)
+
+        close = clean_df["close"]
+        delta = close.diff()
+        gain = delta.clip(lower=0.0)
+        loss = -delta.clip(upper=0.0)
+
+        avg_gain = gain.ewm(
+            alpha=1 / self.RSI_PERIOD, min_periods=self.RSI_PERIOD, adjust=False
+        ).mean()
+        avg_loss = loss.ewm(
+            alpha=1 / self.RSI_PERIOD, min_periods=self.RSI_PERIOD, adjust=False
+        ).mean()
+
+        rs = avg_gain / avg_loss
+        clean_df["rsi"] = 100.0 - (100.0 / (1.0 + rs))
+        clean_df.loc[avg_loss == 0, "rsi"] = 100.0
+        clean_df.loc[(avg_gain == 0) & (avg_loss == 0), "rsi"] = 50.0
+
+        ema_fast = close.ewm(span=self.MACD_FAST, adjust=False, min_periods=self.MACD_FAST).mean()
+        ema_slow = close.ewm(span=self.MACD_SLOW, adjust=False, min_periods=self.MACD_SLOW).mean()
+        clean_df["macd"] = ema_fast - ema_slow
+        clean_df["macd_signal"] = clean_df["macd"].ewm(
+            span=self.MACD_SIGNAL, adjust=False, min_periods=self.MACD_SIGNAL
+        ).mean()
+        clean_df["macd_hist"] = clean_df["macd"] - clean_df["macd_signal"]
+
+        clean_df["roc"] = close.pct_change(periods=self.ROC_PERIOD) * 100.0
+        return clean_df
 
     def add_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
