@@ -2,29 +2,45 @@
 
 TradeEngine is a Python backend for market-data-driven trading workflows.
 
-Current implementation includes Sprint 1 for Upstox historical candles:
+Current implementation includes:
+- Sprint 1: Upstox historical + intraday candle integration
+- Sprint 2: deterministic data validation and cleaning pipeline
+- Sprint 3: deterministic feature engineering pipeline for indicators and context features
+
+Trading strategies, order execution, position/risk management, and DB persistence are still out of scope.
+
+## Implemented Scope
+
+### Sprint 1: Market Data Integration
 - Upstox config validation (fail-fast)
 - OAuth/token-based authentication module
-- Historical candle API client with retries and error handling
+- Historical + intraday candle API client with retry/backoff
 - Candle normalization into typed internal model
-- Service methods for last 500 five-minute candles
-- CLI execution flow
-- FastAPI health endpoint
+- Service methods for latest 500 five-minute candles
+- CLI flow and FastAPI health endpoint
 
-Trading strategies, order execution, and DB persistence are intentionally out of scope right now.
+### Sprint 2: Data Validation & Cleaning
+- Canonical candle schema validation
+- Timestamp normalization to IST
+- Sorting and deduplication
+- Missing interval detection with structured warning logs
+- Numeric type casting with NaN checks
+- Logical OHLCV validation
+- Full clean output contract
 
-## Implemented Scope (Sprint 1)
+Main class:
+- `tradeengine.core.data_processor.MarketDataProcessor`
 
-- Historical source: Upstox
-- Interval: `5minute`
-- Target output: latest `500` normalized candles
-- Timezone normalization: IST (`Asia/Kolkata`)
-- Modes:
-  - Market-hours aware: returns empty outside market hours
-  - Ignore-market-hours: fetches regardless of market status
+### Sprint 3: Feature Engineering
+- Trend: `ema20`, `ema50`, `ema200`, `vwap`
+- Momentum: `rsi`, `macd`, `macd_signal`, `macd_hist`, `roc`
+- Volatility: `atr`, `bb_width`, `rolling_std`
+- Structure/context: `dist_ema20`, `dist_vwap`, `higher_high`, `lower_low`, `rolling_volume_avg`
+- Warmup handling (`dropna` after indicator generation)
+- Full feature contract checks (no NaN, no duplicates, sorted timestamps, finite numerics)
 
-Sprint story reference:
-- `SPRINT_1_UPSTOX_HISTORICAL_DATA.md`
+Main class:
+- `tradeengine.core.features.FeatureEngineer`
 
 ## Project Layout
 
@@ -35,6 +51,9 @@ TradeEngine/
       health.py
     auth/
       upstox_auth.py
+    core/
+      data_processor.py
+      features.py
     market_data/
       models.py
       service.py
@@ -43,59 +62,85 @@ TradeEngine/
       logger.py
     config.py
     main.py
+  scripts/
+    dev.sh
+    export_features_csv.py
+    feature_validation_report.py
   tests/
-    test_config.py
-    test_health.py
-    test_market_data_models.py
-    test_market_data_service.py
+    test_*.py
   .env.example
-  requirements.txt
   pyproject.toml
+  requirements.txt
 ```
 
 ## Prerequisites
 
 - Python `3.11+`
 - Upstox app credentials
-- Upstox access token (sandbox or live, based on your usage)
+- Upstox token (`UPSTOX_ACCESS_TOKEN`) and instrument key
 
 ## Setup
 
-1. Create and activate virtual environment:
+1. Create and activate venv:
    - `python3.11 -m venv .venv`
    - `source .venv/bin/activate`
 2. Install dependencies:
    - `python -m pip install '.[dev]'`
 3. Create env file:
    - `cp .env.example .env`
-4. Fill required env vars in `.env`:
+4. Fill `.env` at minimum:
    - `UPSTOX_API_KEY`
    - `UPSTOX_API_SECRET`
    - `UPSTOX_REDIRECT_URI`
+   - `UPSTOX_ACCESS_TOKEN`
    - `UPSTOX_INSTRUMENT_KEY`
-   - one of:
-     - `UPSTOX_ACCESS_TOKEN` (recommended for sandbox flow)
-     - or `UPSTOX_AUTH_CODE` (OAuth code flow)
 
-## Run Historical Candle Flow
+## Run Market Data Flow
 
-Market-hours aware flow:
+Market-hours aware:
 - `PYTHONPATH=src .venv/bin/python -m tradeengine.main`
 
-Ignore market-hours flow:
+Ignore market-hours gate:
 - `PYTHONPATH=src .venv/bin/python -m tradeengine.main --ignore-market-hours`
 
-Optional CLI args:
-- `--auth-code "<CODE>"`
-- `--instrument-key "<INSTRUMENT_KEY>"`
+## Export Feature CSV
+
+One-command CSV export (latest timestamp first by default):
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_csv.py`
+
+Optional flags:
+- `--output my_features.csv`
+- `--oldest-first`
+- `--respect-market-hours`
+
+Default output file:
+- `feature_validation_output.csv`
+
+## Validate Indicators Against Reference CSV
+
+Use comparison report script:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/feature_validation_report.py \
+  --computed feature_validation_output.csv \
+  --reference tradingview_export.csv \
+  --tolerance 0.05
+```
+
+If column names differ, map them:
+- `--metric ema20:"EMA 20"` (repeat for each metric)
 
 ## Run API Server
 
 - `PYTHONPATH=src .venv/bin/python -m uvicorn tradeengine.main:app --reload --host 0.0.0.0 --port 8000`
 
-Available endpoint:
-- `GET /health` returns `{"status":"ok"}`
+Endpoint:
+- `GET /health` -> `{"status":"ok"}`
 
 ## Run Tests
 
+All tests:
 - `PYTHONPATH=src .venv/bin/python -m pytest -q`
+
+Sprint 3 feature tests only:
+- `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_feature_engineer_story1.py tests/test_feature_engineer_trend.py tests/test_feature_engineer_momentum.py tests/test_feature_engineer_volatility.py tests/test_feature_engineer_structure.py tests/test_feature_engineer_warmup.py tests/test_feature_engineer_pipeline.py`
