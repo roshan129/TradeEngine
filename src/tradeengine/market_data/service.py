@@ -48,7 +48,17 @@ class HistoricalDataService:
             from_datetime=from_ist.astimezone(UTC),
             to_datetime=now_ist.astimezone(UTC),
         )
-        candles = normalize_candles(raw, timezone=str(self._ist_zone))
+        intraday_raw: dict[str, object] = {}
+        try:
+            intraday_raw = self._client.fetch_intraday_candles(
+                instrument_key=symbol,
+                interval="5minute",
+            )
+        except Exception:
+            logger.warning("Unable to fetch intraday candles; proceeding with historical candles only")
+
+        merged_raw = self._merge_raw_payloads(raw, intraday_raw)
+        candles = normalize_candles(merged_raw, timezone=str(self._ist_zone))
         return candles[-self.TARGET_CANDLE_COUNT :]
 
     @staticmethod
@@ -58,3 +68,19 @@ class HistoricalDataService:
         market_open = time(hour=9, minute=15)
         market_close = time(hour=15, minute=30)
         return market_open <= current_ist.time() <= market_close
+
+    @staticmethod
+    def _merge_raw_payloads(
+        historical_payload: dict[str, object],
+        intraday_payload: dict[str, object],
+    ) -> dict[str, object]:
+        historical_candles = historical_payload.get("data", {}).get("candles", [])
+        intraday_candles = intraday_payload.get("data", {}).get("candles", [])
+
+        merged_candles: list[object] = []
+        if isinstance(historical_candles, list):
+            merged_candles.extend(historical_candles)
+        if isinstance(intraday_candles, list):
+            merged_candles.extend(intraday_candles)
+
+        return {"data": {"candles": merged_candles}}
