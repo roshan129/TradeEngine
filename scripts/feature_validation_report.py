@@ -44,6 +44,7 @@ class MetricResult:
 
 
 def _parse_metric_arg(value: str) -> MetricPair:
+    """Parse one --metric argument into computed/reference column pair."""
     # Accept either "ema20" (same col in both files) or "ema20:EMA 20" (mapped).
     if ":" in value:
         left, right = value.split(":", 1)
@@ -62,12 +63,14 @@ def _parse_metric_arg(value: str) -> MetricPair:
 
 
 def _require_columns(df: pd.DataFrame, columns: list[str], label: str) -> None:
+    """Fail fast if required columns are missing from the given dataframe."""
     missing = [col for col in columns if col not in df.columns]
     if missing:
         raise ValueError(f"{label} is missing required columns: {', '.join(missing)}")
 
 
 def _normalize_timestamp(series: pd.Series) -> pd.Series:
+    """Parse timestamp column and normalize to UTC-aware pandas datetime."""
     ts = pd.to_datetime(series, errors="coerce", utc=True)
     if ts.isna().any():
         raise ValueError("Timestamp parsing failed for one or more rows.")
@@ -75,6 +78,7 @@ def _normalize_timestamp(series: pd.Series) -> pd.Series:
 
 
 def _format_float(value: float) -> str:
+    """Pretty formatter for report numeric fields."""
     if math.isnan(value):
         return "nan"
     return f"{value:.8f}"
@@ -85,6 +89,7 @@ def _evaluate_metric(
     pair: MetricPair,
     tolerance: float,
 ) -> MetricResult:
+    """Compute error stats and pass/fail status for one indicator column pair."""
     comp_col = f"{pair.computed_col}__computed"
     ref_col = f"{pair.reference_col}__reference"
 
@@ -129,6 +134,7 @@ def run_report(
     metrics: list[MetricPair],
     tolerance: float,
 ) -> tuple[list[MetricResult], int, int]:
+    """Load files, align on timestamps, and evaluate all requested metrics."""
     computed_df = pd.read_csv(computed_csv)
     reference_df = pd.read_csv(reference_csv)
 
@@ -163,6 +169,7 @@ def run_report(
 
 
 def main() -> int:
+    """CLI entrypoint that prints comparison table and returns status code."""
     parser = argparse.ArgumentParser(
         description="Compare computed feature CSV against a reference CSV and generate indicator error report."
     )

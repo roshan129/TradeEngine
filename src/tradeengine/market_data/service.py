@@ -21,19 +21,23 @@ class HistoricalDataService:
         ist_timezone: str = "Asia/Kolkata",
         enforce_market_hours: bool = True,
     ) -> None:
+        """Initialize historical service with timezone and market-hours policy."""
         self._client = client
         self._ist_zone = ZoneInfo(ist_timezone)
         self._enforce_market_hours = enforce_market_hours
 
     def get_last_500_5min_candles(self, symbol: str) -> list[Candle]:
+        """Fetch last 500 five-minute candles with market-hours enforcement."""
         return self._fetch_last_500_5min_candles(
             symbol=symbol, enforce_market_hours=self._enforce_market_hours
         )
 
     def get_last_500_5min_candles_anytime(self, symbol: str) -> list[Candle]:
+        """Fetch last 500 five-minute candles regardless of market-hours state."""
         return self._fetch_last_500_5min_candles(symbol=symbol, enforce_market_hours=False)
 
     def _fetch_last_500_5min_candles(self, symbol: str, enforce_market_hours: bool) -> list[Candle]:
+        """Internal fetch flow: historical + intraday merge -> normalize -> trim 500."""
         now_ist = datetime.now(self._ist_zone)
 
         if enforce_market_hours and not self._is_market_open(now_ist):
@@ -63,6 +67,7 @@ class HistoricalDataService:
 
     @staticmethod
     def _is_market_open(current_ist: datetime) -> bool:
+        """Check NSE/BSE regular market session window in IST."""
         if current_ist.weekday() >= 5:
             return False
         market_open = time(hour=9, minute=15)
@@ -74,6 +79,7 @@ class HistoricalDataService:
         historical_payload: dict[str, object],
         intraday_payload: dict[str, object],
     ) -> dict[str, object]:
+        """Combine candle arrays from historical and intraday payload structures."""
         historical_candles = historical_payload.get("data", {}).get("candles", [])
         intraday_candles = intraday_payload.get("data", {}).get("candles", [])
 

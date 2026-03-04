@@ -13,6 +13,7 @@ from tradeengine.market_data.upstox_client import UpstoxClient
 
 
 def build_feature_dataframe(ignore_market_hours: bool) -> pd.DataFrame:
+    """Fetch candles from Upstox and return fully engineered feature dataframe."""
     cfg = get_upstox_config()
     auth = UpstoxAuth(
         UpstoxCredentials(
@@ -59,6 +60,7 @@ def build_feature_dataframe(ignore_market_hours: bool) -> pd.DataFrame:
 
 
 def main() -> int:
+    """CLI entrypoint: parse args, build features, sort, and write CSV output."""
     parser = argparse.ArgumentParser(description="Export engineered features CSV from Upstox candles")
     parser.add_argument(
         "--output",

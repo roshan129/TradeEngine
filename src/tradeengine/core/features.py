@@ -60,6 +60,7 @@ class FeatureEngineer:
     )
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate base candle schema/order and return a safe deep copy."""
         if not isinstance(df, pd.DataFrame):
             msg = f"Expected pandas DataFrame, received: {type(df).__name__}"
             logger.error("[FEATURE_ERROR] %s", msg)
@@ -92,6 +93,7 @@ class FeatureEngineer:
 
     @staticmethod
     def safe_shift(series: pd.Series, periods: int) -> pd.Series:
+        """Safe wrapper for pandas shift that blocks future-looking negative shifts."""
         if periods < 0:
             msg = "Negative shift is disallowed to prevent lookahead bias"
             logger.error("[FEATURE_ERROR] %s", msg)
@@ -99,6 +101,7 @@ class FeatureEngineer:
         return series.shift(periods)
 
     def add_trend_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add trend indicators: EMA20/50/200 and VWAP."""
         clean_df = self.prepare_base_dataframe(df)
         clean_df = self._coerce_numeric_ohlcv(clean_df)
 
@@ -114,6 +117,7 @@ class FeatureEngineer:
         return clean_df
 
     def add_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add momentum indicators: RSI, MACD (+signal/hist), and ROC."""
         clean_df = self.prepare_base_dataframe(df)
         clean_df = self._coerce_numeric_ohlcv(clean_df)
 
@@ -146,6 +150,7 @@ class FeatureEngineer:
         return clean_df
 
     def add_volatility_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add volatility indicators: ATR, Bollinger width, and rolling std."""
         clean_df = self.prepare_base_dataframe(df)
         clean_df = self._coerce_numeric_ohlcv(clean_df)
 
@@ -186,6 +191,7 @@ class FeatureEngineer:
         return clean_df
 
     def add_structure_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add contextual structure features and price-distance derived metrics."""
         clean_df = self.prepare_base_dataframe(df)
         clean_df = self._coerce_numeric_ohlcv(clean_df)
 
@@ -218,6 +224,7 @@ class FeatureEngineer:
         return clean_df
 
     def remove_initial_nan_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop warmup rows containing NaN after indicator computation."""
         clean_df = self.prepare_base_dataframe(df)
 
         if len(clean_df) < self.MIN_ROWS_FOR_FULL_FEATURES:
@@ -237,6 +244,7 @@ class FeatureEngineer:
         return clean_df
 
     def full_feature_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Run all feature stages and enforce final no-NaN/no-dup contract."""
         clean_df = self.prepare_base_dataframe(df)
         clean_df = self.add_trend_features(clean_df)
         clean_df = self.add_momentum_features(clean_df)
@@ -282,6 +290,7 @@ class FeatureEngineer:
         return clean_df
 
     def _coerce_numeric_ohlcv(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Convert base OHLCV columns to float64 and reject non-numeric data."""
         clean_df = df.copy(deep=True)
         for col in self.NUMERIC_COLUMNS:
             clean_df[col] = pd.to_numeric(clean_df[col], errors="coerce")

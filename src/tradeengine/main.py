@@ -14,6 +14,7 @@ from tradeengine.utils.logger import configure_logging
 
 
 def create_app() -> FastAPI:
+    """Create and configure FastAPI app instance with core routers."""
     app = FastAPI(title=settings.app_name)
     app.include_router(health_router)
     return app
@@ -27,6 +28,7 @@ def run_historical_data_flow(
     instrument_key: str | None = None,
     ignore_market_hours: bool = False,
 ) -> None:
+    """Run CLI flow: config -> auth -> fetch candles -> print normalized output."""
     configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
 

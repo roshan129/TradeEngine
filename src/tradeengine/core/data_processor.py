@@ -33,6 +33,7 @@ class MarketDataProcessor:
     IST_TIMEZONE = "Asia/Kolkata"
 
     def validate_structure(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate required candle columns and return a deep copy of input."""
         if not isinstance(df, pd.DataFrame):
             msg = f"Expected pandas DataFrame, received: {type(df).__name__}"
             logger.error("[DATA_ERROR] %s", msg)
@@ -47,6 +48,7 @@ class MarketDataProcessor:
         return df.copy(deep=True)
 
     def sort_and_deduplicate(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Sort candles by timestamp and remove duplicate timestamp rows."""
         clean_df = self.validate_structure(df)
         clean_df["timestamp"] = pd.to_datetime(clean_df["timestamp"], errors="coerce")
 
@@ -66,6 +68,7 @@ class MarketDataProcessor:
         return clean_df
 
     def validate_intervals(self, df: pd.DataFrame, timeframe_minutes: int = 5) -> pd.DataFrame:
+        """Detect timestamp gaps larger than expected timeframe and log warnings."""
         if timeframe_minutes <= 0:
             msg = f"timeframe_minutes must be positive, got {timeframe_minutes}"
             logger.error("[DATA_ERROR] %s", msg)
@@ -102,6 +105,7 @@ class MarketDataProcessor:
         return clean_df
 
     def normalize_timestamp(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Parse timestamps, enforce timezone-awareness, convert to IST, and sort."""
         clean_df = self.validate_structure(df)
 
         naive_indices: list[int] = []
@@ -138,6 +142,7 @@ class MarketDataProcessor:
         return clean_df
 
     def cast_types(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Cast OHLCV columns to float64 and fail fast on NaN coercion."""
         clean_df = self.validate_structure(df)
 
         numeric_columns = ["open", "high", "low", "close", "volume"]
@@ -161,6 +166,7 @@ class MarketDataProcessor:
         return clean_df
 
     def validate_logical_candles(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop rows that violate OHLCV sanity rules and log each invalid candle."""
         clean_df = self.cast_types(df)
         timestamps = pd.to_datetime(clean_df["timestamp"], errors="coerce")
         if timestamps.isna().any():
@@ -187,6 +193,7 @@ class MarketDataProcessor:
         return clean_df[valid_mask].reset_index(drop=True)
 
     def full_clean_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Run full deterministic cleaning pipeline and enforce output contract."""
         clean_df = self.validate_structure(df)
         clean_df = self.sort_and_deduplicate(clean_df)
         clean_df = self.normalize_timestamp(clean_df)

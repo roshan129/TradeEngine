@@ -36,6 +36,7 @@ settings = Settings()
 
 
 def get_upstox_config() -> UpstoxConfig:
+    """Return validated Upstox config or raise if required env vars are missing."""
     missing: list[str] = []
     if not settings.upstox_api_key:
         missing.append("UPSTOX_API_KEY")
