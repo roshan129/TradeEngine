@@ -29,3 +29,5 @@ htmlcov/
 .vscode/
 .DS_Store
 
+# Data exports and reports
+*.csv
