@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from tradeengine.core.backtester import BacktestConfig, Backtester
-from tradeengine.core.strategy import BaselineEmaRsiStrategy
+from tradeengine.core.strategy import BaselineEmaRsiStrategy, VwapRsiMeanReversionStrategy
 
 
 def _static_backtest_df() -> pd.DataFrame:
@@ -113,3 +113,144 @@ def test_backtester_executes_short_when_enabled() -> None:
     assert trade["entry_price"] == pytest.approx(99.0)
     assert trade["exit_price"] == pytest.approx(97.0)
     assert trade["net_pnl"] == pytest.approx(100.0)
+
+
+def test_backtester_reverse_signals_opens_short_on_long_setup() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-01T09:15:00+05:30"),
+                pd.Timestamp("2026-01-01T09:20:00+05:30"),
+            ],
+            "open": [100.0, 99.0],
+            "high": [101.0, 99.0],
+            "low": [99.0, 98.0],
+            "close": [100.0, 98.0],
+            "ema20": [101.0, 101.0],
+            "ema50": [100.0, 100.0],
+            "rsi": [60.0, 60.0],
+            "atr": [2.0, 2.0],
+        }
+    )
+    config = BacktestConfig(
+        initial_capital=10_000.0,
+        risk_per_trade=0.01,
+        stop_atr_multiple=1.0,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+    )
+    result = Backtester(
+        strategy=BaselineEmaRsiStrategy(allow_shorts=True, reverse_signals=True),
+        config=config,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "SHORT"
+    assert trade["net_pnl"] == pytest.approx(100.0)
+
+
+def test_backtester_runs_vwap_reversion_strategy() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-01T09:15:00+05:30"),
+                pd.Timestamp("2026-01-01T09:20:00+05:30"),
+                pd.Timestamp("2026-01-01T09:25:00+05:30"),
+            ],
+            "open": [95.0, 96.0, 99.0],
+            "high": [96.0, 100.0, 101.0],
+            "low": [94.0, 95.0, 98.0],
+            "close": [95.0, 99.0, 100.0],
+            "vwap": [100.0, 100.0, 100.0],
+            "rsi": [30.0, 40.0, 45.0],
+        }
+    )
+
+    config = BacktestConfig(
+        initial_capital=10_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+    )
+    result = Backtester(strategy=VwapRsiMeanReversionStrategy(), config=config).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "LONG"
+    assert trade["entry_price"] == pytest.approx(95.0)
+    assert trade["exit_price"] == pytest.approx(100.0)
+    assert trade["net_pnl"] == pytest.approx(100.0)
+
+
+def test_backtester_runs_vwap_reversion_short_trade() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-01T09:15:00+05:30"),
+                pd.Timestamp("2026-01-01T09:20:00+05:30"),
+                pd.Timestamp("2026-01-01T09:25:00+05:30"),
+            ],
+            "open": [101.0, 101.0, 100.0],
+            "high": [102.0, 101.5, 100.5],
+            "low": [100.0, 99.0, 99.0],
+            "close": [101.0, 100.0, 100.0],
+            "vwap": [100.0, 100.0, 100.0],
+            "rsi": [70.0, 60.0, 50.0],
+        }
+    )
+
+    config = BacktestConfig(
+        initial_capital=10_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+    )
+    result = Backtester(
+        strategy=VwapRsiMeanReversionStrategy(allow_shorts=True),
+        config=config,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "SHORT"
+    assert trade["entry_price"] == pytest.approx(101.0)
+    assert trade["exit_price"] == pytest.approx(100.0)
+    assert trade["net_pnl"] == pytest.approx(99.0)
+
+
+def test_backtester_runs_vwap_reversion_reversed_mode() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-01T09:15:00+05:30"),
+                pd.Timestamp("2026-01-01T09:20:00+05:30"),
+            ],
+            "open": [99.0, 98.0],
+            "high": [100.0, 99.0],
+            "low": [98.0, 97.0],
+            "close": [99.0, 98.0],
+            "vwap": [100.0, 100.0],
+            "rsi": [30.0, 30.0],
+        }
+    )
+
+    config = BacktestConfig(
+        initial_capital=10_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+    )
+    result = Backtester(
+        strategy=VwapRsiMeanReversionStrategy(allow_shorts=True, reverse_signals=True),
+        config=config,
+    ).run(df)
+
+    assert len(result.trades) == 1

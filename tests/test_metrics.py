@@ -27,3 +27,8 @@ def test_metrics_match_known_values() -> None:
     assert metrics["profit_factor"] == pytest.approx(5.0)
     assert metrics["max_drawdown_pct"] == pytest.approx((5 / 110) * 100.0)
     assert metrics["expectancy"] == pytest.approx((10.0 - 5.0 + 15.0) / 3.0)
+    assert metrics["gross_wins_after_cost"] == pytest.approx(25.0)
+    assert metrics["gross_losses_after_cost"] == pytest.approx(5.0)
+    assert metrics["gross_wins_before_cost"] == pytest.approx(25.0)
+    assert metrics["gross_losses_before_cost"] == pytest.approx(5.0)
+    assert metrics["breakeven_win_rate_pct"] == pytest.approx(28.57142857)

@@ -6,7 +6,7 @@ import argparse
 import pandas as pd
 
 from tradeengine.core.backtester import BacktestConfig, Backtester
-from tradeengine.core.strategy import BaselineEmaRsiStrategy
+from tradeengine.core.strategy import BaselineEmaRsiStrategy, Strategy, VwapRsiMeanReversionStrategy
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,9 +33,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--brokerage-fixed", type=float, default=20.0)
     parser.add_argument("--brokerage-pct", type=float, default=0.0003)
     parser.add_argument(
+        "--strategy",
+        choices=["ema_rsi", "vwap_rsi_reversion"],
+        default="ema_rsi",
+        help="Strategy to run (default: ema_rsi)",
+    )
+    parser.add_argument(
         "--allow-shorts",
         action="store_true",
         help="Enable short entries/exits for baseline strategy",
+    )
+    parser.add_argument(
+        "--reverse-signals",
+        action="store_true",
+        help="Reverse directional signals (BUY<->SHORT, SELL<->COVER)",
     )
     return parser.parse_args()
 
@@ -47,6 +58,19 @@ def main() -> int:
     timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
     from_ts = timestamps.min()
     to_ts = timestamps.max()
+    short_enabled = args.allow_shorts or args.reverse_signals
+    strategy: Strategy
+    if args.strategy == "vwap_rsi_reversion":
+        strategy = VwapRsiMeanReversionStrategy(
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
+    else:
+        strategy = BaselineEmaRsiStrategy(
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
+
     config = BacktestConfig(
         initial_capital=args.initial_capital,
         risk_per_trade=args.risk_per_trade,
@@ -54,13 +78,10 @@ def main() -> int:
         slippage_pct=args.slippage_pct,
         brokerage_fixed=args.brokerage_fixed,
         brokerage_pct=args.brokerage_pct,
-        allow_shorts=args.allow_shorts,
+        allow_shorts=short_enabled,
     )
 
-    backtester = Backtester(
-        strategy=BaselineEmaRsiStrategy(allow_shorts=args.allow_shorts),
-        config=config,
-    )
+    backtester = Backtester(strategy=strategy, config=config)
     result = backtester.run(df)
 
     result.trades.to_csv(args.trades_output, index=False)
@@ -70,11 +91,23 @@ def main() -> int:
     print(f"- Input rows: {len(df)}")
     print(f"- From: {from_ts}")
     print(f"- To: {to_ts}")
-    print(f"- Mode: {'LONG+SHORT' if args.allow_shorts else 'LONG_ONLY'}")
+    if args.reverse_signals:
+        mode = "REVERSED_LONG+SHORT"
+    elif short_enabled:
+        mode = "LONG+SHORT"
+    else:
+        mode = "LONG_ONLY"
+    print(f"- Strategy: {args.strategy}")
+    print(f"- Mode: {mode}")
     print(f"- Total trades: {len(result.trades)}")
     print(f"- Total return %: {result.metrics['total_return_pct']:.4f}")
     print(f"- Win rate %: {result.metrics['win_rate']:.2f}")
     print(f"- Profit factor: {result.metrics['profit_factor']:.4f}")
+    print(f"- Gross wins (after cost): {result.metrics['gross_wins_after_cost']:.4f}")
+    print(f"- Gross losses (after cost): {result.metrics['gross_losses_after_cost']:.4f}")
+    print(f"- Gross wins (before cost): {result.metrics['gross_wins_before_cost']:.4f}")
+    print(f"- Gross losses (before cost): {result.metrics['gross_losses_before_cost']:.4f}")
+    print(f"- Breakeven win rate %: {result.metrics['breakeven_win_rate_pct']:.2f}")
     print(f"- Max drawdown %: {result.metrics['max_drawdown_pct']:.4f}")
     print(f"- Sharpe ratio: {result.metrics['sharpe_ratio']:.4f}")
     print(f"- Expectancy: {result.metrics['expectancy']:.4f}")

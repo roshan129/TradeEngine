@@ -14,7 +14,13 @@ from tradeengine.core.metrics import (
     compute_sharpe_ratio,
 )
 from tradeengine.core.portfolio import CostModel, Portfolio, PortfolioError, Position, TradeRecord
-from tradeengine.core.strategy import BaselineEmaRsiStrategy, Signal, Strategy, StrategyContext
+from tradeengine.core.strategy import (
+    BaselineEmaRsiStrategy,
+    Signal,
+    Strategy,
+    StrategyContext,
+    VwapRsiMeanReversionStrategy,
+)
 
 __all__ = [
     "MarketDataProcessor",
@@ -25,6 +31,7 @@ __all__ = [
     "Strategy",
     "StrategyContext",
     "BaselineEmaRsiStrategy",
+    "VwapRsiMeanReversionStrategy",
     "CostModel",
     "Position",
     "TradeRecord",

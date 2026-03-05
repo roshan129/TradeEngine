@@ -184,5 +184,12 @@ Run backtest tests:
 
 Run backtest CLI:
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv`
+- Select strategy:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy ema_rsi`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy vwap_rsi_reversion`
 - Enable short mode:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy ema_rsi --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy vwap_rsi_reversion --allow-shorts`
+- Reverse long/short signals:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy ema_rsi --reverse-signals`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy vwap_rsi_reversion --reverse-signals`

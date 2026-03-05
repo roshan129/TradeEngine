@@ -34,24 +34,25 @@ class BacktestResult:
 
 
 class Backtester:
-    REQUIRED_COLUMNS: tuple[str, ...] = (
+    BASE_REQUIRED_COLUMNS: tuple[str, ...] = (
         "timestamp",
         "open",
         "high",
         "low",
         "close",
-        "ema20",
-        "ema50",
-        "rsi",
-        "atr",
     )
 
     def __init__(self, strategy: Strategy, config: BacktestConfig | None = None) -> None:
         self.strategy = strategy
         self.config = config or BacktestConfig()
 
+    def _required_columns(self) -> tuple[str, ...]:
+        strategy_columns = getattr(self.strategy, "required_columns", ())
+        return self.BASE_REQUIRED_COLUMNS + tuple(strategy_columns)
+
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        missing = [col for col in self.REQUIRED_COLUMNS if col not in df.columns]
+        required_columns = self._required_columns()
+        missing = [col for col in required_columns if col not in df.columns]
         if missing:
             raise BacktestError(f"Missing required columns for backtest: {', '.join(missing)}")
 
@@ -64,7 +65,7 @@ class Backtester:
         if clean["timestamp"].duplicated().any():
             raise BacktestError("Backtest dataframe contains duplicate timestamps")
 
-        numeric_cols = [c for c in self.REQUIRED_COLUMNS if c != "timestamp"]
+        numeric_cols = [c for c in required_columns if c != "timestamp"]
         for col in numeric_cols:
             clean[col] = pd.to_numeric(clean[col], errors="coerce")
 
@@ -118,7 +119,7 @@ class Backtester:
             timestamp = pd.Timestamp(row["timestamp"])
             close = float(row["close"])
             low = float(row["low"])
-            atr = float(row["atr"])
+            high = float(row["high"])
             is_eod = self._is_end_of_day(candles, i)
             exited_this_candle = False
 
@@ -127,7 +128,7 @@ class Backtester:
                 stop_hit = (
                     low <= position.stop_loss
                     if position.side == "LONG"
-                    else float(row["high"]) >= position.stop_loss
+                    else high >= position.stop_loss
                 )
                 if i > position.entry_index and stop_hit:
                     portfolio.exit_position(
@@ -159,9 +160,13 @@ class Backtester:
                     continue
 
                 if signal == "BUY":
-                    stop_distance = atr * self.config.stop_atr_multiple
-                    if stop_distance > 0:
-                        stop_loss = close - stop_distance
+                    stop_loss = self.strategy.entry_stop_loss(
+                        row=row,
+                        signal=signal,
+                        stop_atr_multiple=self.config.stop_atr_multiple,
+                    )
+                    if stop_loss is not None:
+                        stop_distance = abs(close - stop_loss)
                         quantity, risk_amount = self._compute_quantity(
                             capital=portfolio.capital,
                             close_price=close,
@@ -179,9 +184,13 @@ class Backtester:
                                 risk_amount=risk_amount,
                             )
                 elif signal == "SHORT" and self.config.allow_shorts:
-                    stop_distance = atr * self.config.stop_atr_multiple
-                    if stop_distance > 0:
-                        stop_loss = close + stop_distance
+                    stop_loss = self.strategy.entry_stop_loss(
+                        row=row,
+                        signal=signal,
+                        stop_atr_multiple=self.config.stop_atr_multiple,
+                    )
+                    if stop_loss is not None:
+                        stop_distance = abs(close - stop_loss)
                         quantity, risk_amount = self._compute_quantity(
                             capital=portfolio.capital,
                             close_price=close,

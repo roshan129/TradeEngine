@@ -47,6 +47,11 @@ def compute_performance_metrics(
             "max_drawdown_pct": 0.0,
             "sharpe_ratio": 0.0,
             "expectancy": 0.0,
+            "gross_wins_after_cost": 0.0,
+            "gross_losses_after_cost": 0.0,
+            "gross_wins_before_cost": 0.0,
+            "gross_losses_before_cost": 0.0,
+            "breakeven_win_rate_pct": 0.0,
         }
 
     initial_equity = float(equity_df["equity"].iloc[0])
@@ -59,23 +64,44 @@ def compute_performance_metrics(
         average_loss = 0.0
         profit_factor = 0.0
         expectancy = 0.0
+        gross_wins_after_cost = 0.0
+        gross_losses_after_cost = 0.0
+        gross_wins_before_cost = 0.0
+        gross_losses_before_cost = 0.0
+        breakeven_win_rate_pct = 0.0
     else:
         net_pnl = pd.to_numeric(trades_df["net_pnl"], errors="coerce").dropna()
+        gross_pnl_col = "gross_pnl" if "gross_pnl" in trades_df.columns else "net_pnl"
+        gross_pnl = pd.to_numeric(trades_df[gross_pnl_col], errors="coerce").dropna()
         wins = net_pnl[net_pnl > 0]
         losses = net_pnl[net_pnl < 0]
+        gross_wins = gross_pnl[gross_pnl > 0]
+        gross_losses = gross_pnl[gross_pnl < 0]
 
         win_rate = float((len(wins) / len(net_pnl)) * 100.0) if len(net_pnl) > 0 else 0.0
         average_win = float(wins.mean()) if not wins.empty else 0.0
         average_loss = float(losses.mean()) if not losses.empty else 0.0
 
-        gross_wins = float(wins.sum()) if not wins.empty else 0.0
-        gross_losses = float(abs(losses.sum())) if not losses.empty else 0.0
-        if gross_losses == 0.0:
-            profit_factor = float("inf") if gross_wins > 0 else 0.0
+        gross_wins_after_cost = float(wins.sum()) if not wins.empty else 0.0
+        gross_losses_after_cost = float(abs(losses.sum())) if not losses.empty else 0.0
+        gross_wins_before_cost = float(gross_wins.sum()) if not gross_wins.empty else 0.0
+        gross_losses_before_cost = (
+            float(abs(gross_losses.sum())) if not gross_losses.empty else 0.0
+        )
+
+        if gross_losses_after_cost == 0.0:
+            profit_factor = float("inf") if gross_wins_after_cost > 0 else 0.0
         else:
-            profit_factor = gross_wins / gross_losses
+            profit_factor = gross_wins_after_cost / gross_losses_after_cost
 
         expectancy = float(net_pnl.mean()) if not net_pnl.empty else 0.0
+
+        avg_win_abs = abs(average_win)
+        avg_loss_abs = abs(average_loss)
+        if avg_win_abs + avg_loss_abs > 0:
+            breakeven_win_rate_pct = (avg_loss_abs / (avg_win_abs + avg_loss_abs)) * 100.0
+        else:
+            breakeven_win_rate_pct = 0.0
 
     max_drawdown_pct = compute_max_drawdown(equity_df["equity"])
     sharpe_ratio = compute_sharpe_ratio(equity_df["equity"])
@@ -89,6 +115,11 @@ def compute_performance_metrics(
         "max_drawdown_pct": float(max_drawdown_pct),
         "sharpe_ratio": float(sharpe_ratio),
         "expectancy": float(expectancy),
+        "gross_wins_after_cost": float(gross_wins_after_cost),
+        "gross_losses_after_cost": float(gross_losses_after_cost),
+        "gross_wins_before_cost": float(gross_wins_before_cost),
+        "gross_losses_before_cost": float(gross_losses_before_cost),
+        "breakeven_win_rate_pct": float(breakeven_win_rate_pct),
     }
 
     for key, value in metrics.items():
