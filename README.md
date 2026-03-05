@@ -11,19 +11,26 @@ Current implementation includes:
 Live order execution and DB persistence are still out of scope.
 
 ## Sprint 4: Backtesting Engine
-- Stateless strategy contract (`BUY` / `SELL` / `HOLD`)
-- Baseline EMA+RSI long-only strategy
+- Stateless strategy contract (`BUY` / `SELL` / `SHORT` / `COVER` / `HOLD`)
+- Multiple strategies:
+  - `ema_rsi` (trend + momentum baseline)
+  - `vwap_rsi_reversion` (mean reversion baseline)
 - Candle-by-candle event-driven backtest loop (no vectorized leakage)
 - Single-position portfolio model with dynamic ATR-based position sizing
-- Stop loss, RSI exit, and end-of-day exits
+- Stop loss, strategy exits, and end-of-day exits
 - Brokerage and slippage cost simulation
 - Structured trade log and equity curve generation
-- Performance metrics: return, win rate, avg win/loss, profit factor, max drawdown, Sharpe, expectancy
+- Performance metrics:
+  - return, win rate, avg win/loss, profit factor
+  - gross wins/losses (before and after costs)
+  - breakeven win rate
+  - max drawdown, Sharpe, expectancy
 
 Main classes:
 - `tradeengine.core.backtester.Backtester`
 - `tradeengine.core.portfolio.Portfolio`
 - `tradeengine.core.strategy.BaselineEmaRsiStrategy`
+- `tradeengine.core.strategy.VwapRsiMeanReversionStrategy`
 - `tradeengine.core.metrics.compute_performance_metrics`
 
 ## Implemented Scope
@@ -150,6 +157,9 @@ Optional:
 - `--raw-output raw_history_ohlcv.csv`
 - `--pause-seconds 0.2`
 
+Example:
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_output.csv --raw-output raw_history_ohlcv.csv`
+
 ## Validate Indicators Against Reference CSV
 
 Use comparison report script:
@@ -184,12 +194,19 @@ Run backtest tests:
 
 Run backtest CLI:
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv`
-- Select strategy:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy ema_rsi`
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy vwap_rsi_reversion`
-- Enable short mode:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy ema_rsi --allow-shorts`
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy vwap_rsi_reversion --allow-shorts`
-- Reverse long/short signals:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy ema_rsi --reverse-signals`
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --strategy vwap_rsi_reversion --reverse-signals`
+
+EMA+RSI strategy commands:
+- Long-only:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy ema_rsi`
+- Long+Short:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy ema_rsi --allow-shorts`
+- Reversed signals:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy ema_rsi --reverse-signals`
+
+VWAP+RSI reversion strategy commands:
+- Long-only:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion`
+- Long+Short (`SHORT` when `close > vwap` and `rsi > 65`):
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --allow-shorts`
+- Reversed signals:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --reverse-signals`
