@@ -6,8 +6,25 @@ Current implementation includes:
 - Sprint 1: Upstox historical + intraday candle integration
 - Sprint 2: deterministic data validation and cleaning pipeline
 - Sprint 3: deterministic feature engineering pipeline for indicators and context features
+- Sprint 4: deterministic, event-driven backtesting engine
 
-Trading strategies, order execution, position/risk management, and DB persistence are still out of scope.
+Live order execution and DB persistence are still out of scope.
+
+## Sprint 4: Backtesting Engine
+- Stateless strategy contract (`BUY` / `SELL` / `HOLD`)
+- Baseline EMA+RSI long-only strategy
+- Candle-by-candle event-driven backtest loop (no vectorized leakage)
+- Single-position portfolio model with dynamic ATR-based position sizing
+- Stop loss, RSI exit, and end-of-day exits
+- Brokerage and slippage cost simulation
+- Structured trade log and equity curve generation
+- Performance metrics: return, win rate, avg win/loss, profit factor, max drawdown, Sharpe, expectancy
+
+Main classes:
+- `tradeengine.core.backtester.Backtester`
+- `tradeengine.core.portfolio.Portfolio`
+- `tradeengine.core.strategy.BaselineEmaRsiStrategy`
+- `tradeengine.core.metrics.compute_performance_metrics`
 
 ## Implemented Scope
 
@@ -54,6 +71,10 @@ TradeEngine/
     core/
       data_processor.py
       features.py
+      strategy.py
+      portfolio.py
+      backtester.py
+      metrics.py
     market_data/
       models.py
       service.py
@@ -66,6 +87,7 @@ TradeEngine/
     dev.sh
     export_features_csv.py
     feature_validation_report.py
+    run_backtest.py
   tests/
     test_*.py
   .env.example
@@ -144,3 +166,9 @@ All tests:
 
 Sprint 3 feature tests only:
 - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_feature_engineer_story1.py tests/test_feature_engineer_trend.py tests/test_feature_engineer_momentum.py tests/test_feature_engineer_volatility.py tests/test_feature_engineer_structure.py tests/test_feature_engineer_warmup.py tests/test_feature_engineer_pipeline.py`
+
+Run backtest tests:
+- `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_strategy_backtesting.py tests/test_portfolio.py tests/test_backtester.py tests/test_metrics.py`
+
+Run backtest CLI:
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv`
