@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import pandas as pd
+
+PositionSide = Literal["LONG", "SHORT"]
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,7 @@ class CostModel:
 
 @dataclass
 class Position:
+    side: PositionSide
     entry_price: float
     quantity: int
     stop_loss: float
@@ -34,6 +38,7 @@ class Position:
 
 @dataclass(frozen=True)
 class TradeRecord:
+    side: PositionSide
     entry_timestamp: pd.Timestamp
     entry_price: float
     exit_timestamp: pd.Timestamp
@@ -67,14 +72,19 @@ class Portfolio:
     def has_open_position(self) -> bool:
         return self.open_position is not None
 
-    def estimate_entry_fill_price(self, price: float) -> float:
-        return float(price) * (1.0 + self.cost_model.slippage_pct)
-
-    def estimate_exit_fill_price(self, price: float) -> float:
+    def estimate_entry_fill_price(self, price: float, side: PositionSide) -> float:
+        if side == "LONG":
+            return float(price) * (1.0 + self.cost_model.slippage_pct)
         return float(price) * (1.0 - self.cost_model.slippage_pct)
+
+    def estimate_exit_fill_price(self, price: float, side: PositionSide) -> float:
+        if side == "LONG":
+            return float(price) * (1.0 - self.cost_model.slippage_pct)
+        return float(price) * (1.0 + self.cost_model.slippage_pct)
 
     def enter_position(
         self,
+        side: PositionSide,
         timestamp: pd.Timestamp,
         candle_close: float,
         stop_loss: float,
@@ -87,16 +97,20 @@ class Portfolio:
         if quantity <= 0:
             return False
 
-        entry_price = self.estimate_entry_fill_price(candle_close)
+        entry_price = self.estimate_entry_fill_price(candle_close, side=side)
         notional = entry_price * quantity
         brokerage = self.cost_model.brokerage(notional)
-        total_cost = notional + brokerage
+        if side == "LONG":
+            total_cost = notional + brokerage
+            if total_cost > self.capital:
+                return False
+            self.capital -= total_cost
+        else:
+            # Short entry receives sale proceeds; brokerage is paid at entry.
+            self.capital += notional - brokerage
 
-        if total_cost > self.capital:
-            return False
-
-        self.capital -= total_cost
         self.open_position = Position(
+            side=side,
             entry_price=entry_price,
             quantity=quantity,
             stop_loss=float(stop_loss),
@@ -119,14 +133,18 @@ class Portfolio:
             raise PortfolioError("No open position to exit")
 
         raw_exit_price = position.stop_loss if use_stop_fill else float(candle_price)
-        exit_price = self.estimate_exit_fill_price(raw_exit_price)
+        exit_price = self.estimate_exit_fill_price(raw_exit_price, side=position.side)
         exit_notional = exit_price * position.quantity
         exit_brokerage = self.cost_model.brokerage(exit_notional)
 
-        gross_pnl = (exit_price - position.entry_price) * position.quantity
-        net_pnl = gross_pnl - position.entry_brokerage - exit_brokerage
+        if position.side == "LONG":
+            gross_pnl = (exit_price - position.entry_price) * position.quantity
+            self.capital += exit_notional - exit_brokerage
+        else:
+            gross_pnl = (position.entry_price - exit_price) * position.quantity
+            self.capital -= exit_notional + exit_brokerage
 
-        self.capital += exit_notional - exit_brokerage
+        net_pnl = gross_pnl - position.entry_brokerage - exit_brokerage
 
         trade_duration = timestamp - position.entry_time
         trade_duration_minutes = float(trade_duration.total_seconds() / 60.0)
@@ -136,6 +154,7 @@ class Portfolio:
             r_multiple = 0.0
 
         record = TradeRecord(
+            side=position.side,
             entry_timestamp=position.entry_time,
             entry_price=position.entry_price,
             exit_timestamp=timestamp,
@@ -155,13 +174,17 @@ class Portfolio:
     def mark_to_market_equity(self, close_price: float) -> float:
         equity = self.capital
         if self.open_position is not None:
-            equity += self.open_position.quantity * float(close_price)
+            if self.open_position.side == "LONG":
+                equity += self.open_position.quantity * float(close_price)
+            else:
+                equity -= self.open_position.quantity * float(close_price)
         return equity
 
     def trade_log_dataframe(self) -> pd.DataFrame:
         if not self.trade_log:
             return pd.DataFrame(
                 columns=[
+                    "side",
                     "entry_timestamp",
                     "entry_price",
                     "exit_timestamp",

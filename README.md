@@ -184,3 +184,5 @@ Run backtest tests:
 
 Run backtest CLI:
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv`
+- Enable short mode:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv --allow-shorts`

@@ -23,6 +23,7 @@ class BacktestConfig:
     brokerage_fixed: float = 20.0
     brokerage_pct: float = 0.0003
     force_end_of_day_exit: bool = True
+    allow_shorts: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class Backtester:
         capital: float,
         close_price: float,
         stop_distance: float,
+        side: str,
     ) -> tuple[int, float]:
         if stop_distance <= 0 or close_price <= 0 or capital <= 0:
             return 0, 0.0
@@ -89,7 +91,10 @@ class Backtester:
         risk_amount = capital * self.config.risk_per_trade
         qty_by_risk = int(np.floor(risk_amount / stop_distance))
 
-        entry_fill = close_price * (1.0 + self.config.slippage_pct)
+        if side == "LONG":
+            entry_fill = close_price * (1.0 + self.config.slippage_pct)
+        else:
+            entry_fill = close_price * (1.0 - self.config.slippage_pct)
         qty_by_capital = int(np.floor(capital / entry_fill))
         quantity = max(0, min(qty_by_risk, qty_by_capital))
 
@@ -119,7 +124,12 @@ class Backtester:
 
             if portfolio.open_position is not None:
                 position = portfolio.open_position
-                if i > position.entry_index and low <= position.stop_loss:
+                stop_hit = (
+                    low <= position.stop_loss
+                    if position.side == "LONG"
+                    else float(row["high"]) >= position.stop_loss
+                )
+                if i > position.entry_index and stop_hit:
                     portfolio.exit_position(
                         timestamp=timestamp,
                         candle_price=position.stop_loss,
@@ -132,6 +142,7 @@ class Backtester:
                 in_position=portfolio.has_open_position,
                 available_capital=portfolio.capital,
                 is_end_of_day=is_eod,
+                position_side=portfolio.open_position.side if portfolio.open_position else None,
             )
             signal = self.strategy.generate_signal(row, context)
 
@@ -155,9 +166,31 @@ class Backtester:
                             capital=portfolio.capital,
                             close_price=close,
                             stop_distance=stop_distance,
+                            side="LONG",
                         )
                         if quantity > 0:
                             portfolio.enter_position(
+                                side="LONG",
+                                timestamp=timestamp,
+                                candle_close=close,
+                                stop_loss=stop_loss,
+                                quantity=quantity,
+                                entry_index=i,
+                                risk_amount=risk_amount,
+                            )
+                elif signal == "SHORT" and self.config.allow_shorts:
+                    stop_distance = atr * self.config.stop_atr_multiple
+                    if stop_distance > 0:
+                        stop_loss = close + stop_distance
+                        quantity, risk_amount = self._compute_quantity(
+                            capital=portfolio.capital,
+                            close_price=close,
+                            stop_distance=stop_distance,
+                            side="SHORT",
+                        )
+                        if quantity > 0:
+                            portfolio.enter_position(
+                                side="SHORT",
                                 timestamp=timestamp,
                                 candle_close=close,
                                 stop_loss=stop_loss,
@@ -166,11 +199,13 @@ class Backtester:
                                 risk_amount=risk_amount,
                             )
             else:
-                if signal == "SELL":
+                if signal in {"SELL", "COVER"}:
                     portfolio.exit_position(
                         timestamp=timestamp,
                         candle_price=close,
-                        exit_reason="STRATEGY_EXIT",
+                        exit_reason=(
+                            "STRATEGY_EXIT_LONG" if signal == "SELL" else "STRATEGY_EXIT_SHORT"
+                        ),
                         use_stop_fill=False,
                     )
                 elif self.config.force_end_of_day_exit and is_eod:

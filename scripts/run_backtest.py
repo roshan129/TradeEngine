@@ -32,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--slippage-pct", type=float, default=0.0005)
     parser.add_argument("--brokerage-fixed", type=float, default=20.0)
     parser.add_argument("--brokerage-pct", type=float, default=0.0003)
+    parser.add_argument(
+        "--allow-shorts",
+        action="store_true",
+        help="Enable short entries/exits for baseline strategy",
+    )
     return parser.parse_args()
 
 
@@ -39,6 +44,9 @@ def main() -> int:
     args = parse_args()
 
     df = pd.read_csv(args.input)
+    timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    from_ts = timestamps.min()
+    to_ts = timestamps.max()
     config = BacktestConfig(
         initial_capital=args.initial_capital,
         risk_per_trade=args.risk_per_trade,
@@ -46,9 +54,13 @@ def main() -> int:
         slippage_pct=args.slippage_pct,
         brokerage_fixed=args.brokerage_fixed,
         brokerage_pct=args.brokerage_pct,
+        allow_shorts=args.allow_shorts,
     )
 
-    backtester = Backtester(strategy=BaselineEmaRsiStrategy(), config=config)
+    backtester = Backtester(
+        strategy=BaselineEmaRsiStrategy(allow_shorts=args.allow_shorts),
+        config=config,
+    )
     result = backtester.run(df)
 
     result.trades.to_csv(args.trades_output, index=False)
@@ -56,6 +68,9 @@ def main() -> int:
 
     print("Backtest Summary")
     print(f"- Input rows: {len(df)}")
+    print(f"- From: {from_ts}")
+    print(f"- To: {to_ts}")
+    print(f"- Mode: {'LONG+SHORT' if args.allow_shorts else 'LONG_ONLY'}")
     print(f"- Total trades: {len(result.trades)}")
     print(f"- Total return %: {result.metrics['total_return_pct']:.4f}")
     print(f"- Win rate %: {result.metrics['win_rate']:.2f}")

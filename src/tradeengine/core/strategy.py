@@ -5,7 +5,8 @@ from typing import Literal, Protocol
 
 import pandas as pd
 
-Signal = Literal["BUY", "SELL", "HOLD"]
+Signal = Literal["BUY", "SELL", "SHORT", "COVER", "HOLD"]
+PositionSide = Literal["LONG", "SHORT"]
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class StrategyContext:
     in_position: bool
     available_capital: float
     is_end_of_day: bool
+    position_side: PositionSide | None = None
 
 
 class Strategy(Protocol):
@@ -30,6 +32,7 @@ class BaselineEmaRsiStrategy:
 
     entry_rsi_threshold: float = 55.0
     exit_rsi_threshold: float = 45.0
+    allow_shorts: bool = False
 
     def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
         ema20 = float(row.get("ema20", float("nan")))
@@ -40,11 +43,18 @@ class BaselineEmaRsiStrategy:
             return "HOLD"
 
         if context.in_position:
+            if context.position_side == "SHORT":
+                if rsi > self.entry_rsi_threshold or context.is_end_of_day:
+                    return "COVER"
+                return "HOLD"
+
             if rsi < self.exit_rsi_threshold or context.is_end_of_day:
                 return "SELL"
             return "HOLD"
 
         if ema20 > ema50 and rsi > self.entry_rsi_threshold:
             return "BUY"
+        if self.allow_shorts and ema20 < ema50 and rsi < self.exit_rsi_threshold:
+            return "SHORT"
 
         return "HOLD"

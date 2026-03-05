@@ -71,3 +71,45 @@ def test_backtester_is_deterministic_for_same_dataset() -> None:
     assert first.equity_curve.equals(second.equity_curve)
     assert first.metrics == second.metrics
     assert len(first.equity_curve) == len(df)
+
+
+def test_backtester_executes_short_when_enabled() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-01T09:15:00+05:30"),
+                pd.Timestamp("2026-01-01T09:20:00+05:30"),
+                pd.Timestamp("2026-01-01T09:25:00+05:30"),
+            ],
+            "open": [100.0, 99.0, 98.0],
+            "high": [100.0, 100.0, 99.0],
+            "low": [99.0, 98.0, 97.0],
+            "close": [99.0, 98.0, 97.0],
+            "ema20": [99.0, 99.0, 99.0],
+            "ema50": [100.0, 100.0, 100.0],
+            "rsi": [40.0, 40.0, 60.0],
+            "atr": [2.0, 2.0, 2.0],
+        }
+    )
+
+    config = BacktestConfig(
+        initial_capital=10_000.0,
+        risk_per_trade=0.01,
+        stop_atr_multiple=1.0,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+    )
+
+    result = Backtester(
+        strategy=BaselineEmaRsiStrategy(allow_shorts=True),
+        config=config,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "SHORT"
+    assert trade["entry_price"] == pytest.approx(99.0)
+    assert trade["exit_price"] == pytest.approx(97.0)
+    assert trade["net_pnl"] == pytest.approx(100.0)
