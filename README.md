@@ -86,6 +86,7 @@ TradeEngine/
   scripts/
     dev.sh
     export_features_csv.py
+    export_features_history.py
     feature_validation_report.py
     run_backtest.py
   tests/
@@ -137,6 +138,17 @@ Optional flags:
 
 Default output file:
 - `feature_validation_output.csv`
+
+## Export Multi-Month Feature History
+
+Fetch historical 5-minute candles in date chunks, stitch deterministically, clean, and compute features:
+
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_output.csv`
+
+Optional:
+- `--symbol NSE_EQ|INE848E01016` (or uses `UPSTOX_INSTRUMENT_KEY`)
+- `--raw-output raw_history_ohlcv.csv`
+- `--pause-seconds 0.2`
 
 ## Validate Indicators Against Reference CSV
 

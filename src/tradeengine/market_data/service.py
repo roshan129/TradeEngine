@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta, time
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from tradeengine.market_data.models import Candle, normalize_candles
@@ -36,12 +36,33 @@ class HistoricalDataService:
         """Fetch last 500 five-minute candles regardless of market-hours state."""
         return self._fetch_last_500_5min_candles(symbol=symbol, enforce_market_hours=False)
 
+    def get_5min_candles_between(
+        self,
+        symbol: str,
+        from_ist: datetime,
+        to_ist: datetime,
+    ) -> list[Candle]:
+        """Fetch full 5-minute candles for a date range without local row-cap trimming."""
+        if to_ist < from_ist:
+            raise ValueError("to_ist must be >= from_ist")
+
+        raw = self._client.fetch_historical_candles(
+            instrument_key=symbol,
+            interval="5minute",
+            from_datetime=from_ist.astimezone(UTC),
+            to_datetime=to_ist.astimezone(UTC),
+        )
+        return normalize_candles(raw, timezone=str(self._ist_zone))
+
     def _fetch_last_500_5min_candles(self, symbol: str, enforce_market_hours: bool) -> list[Candle]:
         """Internal fetch flow: historical + intraday merge -> normalize -> trim 500."""
         now_ist = datetime.now(self._ist_zone)
 
         if enforce_market_hours and not self._is_market_open(now_ist):
-            logger.warning("Market appears closed for IST timestamp=%s. Returning empty candles.", now_ist)
+            logger.warning(
+                "Market appears closed for IST timestamp=%s. Returning empty candles.",
+                now_ist,
+            )
             return []
 
         # Use a safe date window for 5-minute data, then trim to latest 500 candles.
@@ -59,7 +80,9 @@ class HistoricalDataService:
                 interval="5minute",
             )
         except Exception:
-            logger.warning("Unable to fetch intraday candles; proceeding with historical candles only")
+            logger.warning(
+                "Unable to fetch intraday candles; proceeding with historical candles only"
+            )
 
         merged_raw = self._merge_raw_payloads(raw, intraday_raw)
         candles = normalize_candles(merged_raw, timezone=str(self._ist_zone))
