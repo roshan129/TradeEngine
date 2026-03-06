@@ -16,7 +16,7 @@ class BacktestError(ValueError):
 
 @dataclass(frozen=True)
 class BacktestConfig:
-    initial_capital: float = 10_000.0
+    initial_capital: float = 100_000.0
     risk_per_trade: float = 0.01
     stop_atr_multiple: float = 1.0
     slippage_pct: float = 0.0005

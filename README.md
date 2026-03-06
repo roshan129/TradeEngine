@@ -7,6 +7,7 @@ Current implementation includes:
 - Sprint 2: deterministic data validation and cleaning pipeline
 - Sprint 3: deterministic feature engineering pipeline for indicators and context features
 - Sprint 4: deterministic, event-driven backtesting engine
+- Sprint 5: deterministic labeling engine and ML dataset builder
 
 Live order execution and DB persistence are still out of scope.
 
@@ -32,6 +33,22 @@ Main classes:
 - `tradeengine.core.strategy.BaselineEmaRsiStrategy`
 - `tradeengine.core.strategy.VwapRsiMeanReversionStrategy`
 - `tradeengine.core.metrics.compute_performance_metrics`
+
+## Sprint 5: Labeling Engine & ML Dataset Builder
+- Future-outcome labeling with leakage-safe forward shifts (`shift(-horizon)`)
+- Fixed-threshold labels (`BUY` / `SELL` / `HOLD`)
+- Multi-horizon return columns (`future_return_5`, `future_return_10`, `future_return_20`)
+- Volatility-adjusted labels using ATR multiples
+- ML dataset builder with strict schema + validation:
+  - no NaN
+  - no infinite numeric values
+  - sorted timestamps
+  - unique timestamps
+- Class-distribution stats (`BUY`, `SELL`, `HOLD`) for imbalance checks
+
+Main classes:
+- `tradeengine.ml.labeling.LabelGenerator`
+- `tradeengine.ml.dataset_builder.DatasetBuilder`
 
 ## Implemented Scope
 
@@ -88,6 +105,9 @@ TradeEngine/
       upstox_client.py
     utils/
       logger.py
+    ml/
+      labeling.py
+      dataset_builder.py
     config.py
     main.py
   scripts/
@@ -96,6 +116,7 @@ TradeEngine/
     export_features_history.py
     feature_validation_report.py
     run_backtest.py
+    build_ml_dataset.py
   tests/
     test_*.py
   .env.example
@@ -192,6 +213,9 @@ Sprint 3 feature tests only:
 Run backtest tests:
 - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_strategy_backtesting.py tests/test_portfolio.py tests/test_backtester.py tests/test_metrics.py`
 
+Run Sprint 5 labeling tests:
+- `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_labeling.py`
+
 Run backtest CLI:
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv`
 
@@ -210,3 +234,14 @@ VWAP+RSI reversion strategy commands:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --allow-shorts`
 - Reversed signals:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --reverse-signals`
+
+Build ML dataset:
+- `PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py --input feature_history_output.csv --output ml_dataset.csv`
+
+Optional ML flags:
+- `--horizons 5,10,20`
+- `--label-horizon 5`
+- `--buy-threshold 0.003`
+- `--sell-threshold -0.003`
+- `--use-volatility-adjusted-labels`
+- `--atr-multiplier 0.5`

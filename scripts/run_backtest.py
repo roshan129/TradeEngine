@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
         default="backtest_equity.csv",
         help="Output CSV path for equity curve (default: backtest_equity.csv)",
     )
-    parser.add_argument("--initial-capital", type=float, default=10_000.0)
+    parser.add_argument("--initial-capital", type=float, default=100_000.0)
     parser.add_argument("--risk-per-trade", type=float, default=0.01)
     parser.add_argument("--stop-atr-multiple", type=float, default=1.0)
     parser.add_argument("--slippage-pct", type=float, default=0.0005)
