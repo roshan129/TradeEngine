@@ -6,7 +6,12 @@ import argparse
 import pandas as pd
 
 from tradeengine.core.backtester import BacktestConfig, Backtester
-from tradeengine.core.strategy import BaselineEmaRsiStrategy, Strategy, VwapRsiMeanReversionStrategy
+from tradeengine.core.strategy import (
+    BaselineEmaRsiStrategy,
+    OneMinuteVwapEma9ScalpStrategy,
+    Strategy,
+    VwapRsiMeanReversionStrategy,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -14,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input",
         required=True,
-        help="Path to input CSV containing OHLC + required indicators (ema20, ema50, rsi, atr)",
+        help="Path to input CSV containing OHLC + indicator columns required by selected strategy",
     )
     parser.add_argument(
         "--trades-output",
@@ -34,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--brokerage-pct", type=float, default=0.0003)
     parser.add_argument(
         "--strategy",
-        choices=["ema_rsi", "vwap_rsi_reversion"],
+        choices=["ema_rsi", "vwap_rsi_reversion", "one_minute_vwap_ema9_scalp"],
         default="ema_rsi",
         help="Strategy to run (default: ema_rsi)",
     )
@@ -47,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         "--reverse-signals",
         action="store_true",
         help="Reverse directional signals (BUY<->SHORT, SELL<->COVER)",
+    )
+    parser.add_argument(
+        "--scalp-tp-mode",
+        choices=["rr", "atr"],
+        default="rr",
+        help="Take-profit mode for one_minute_vwap_ema9_scalp (default: rr)",
     )
     return parser.parse_args()
 
@@ -64,6 +75,12 @@ def main() -> int:
         strategy = VwapRsiMeanReversionStrategy(
             allow_shorts=short_enabled,
             reverse_signals=args.reverse_signals,
+        )
+    elif args.strategy == "one_minute_vwap_ema9_scalp":
+        strategy = OneMinuteVwapEma9ScalpStrategy(
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+            take_profit_mode=args.scalp_tp_mode,
         )
     else:
         strategy = BaselineEmaRsiStrategy(

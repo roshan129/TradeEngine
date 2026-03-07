@@ -144,6 +144,12 @@ class Backtester:
                 available_capital=portfolio.capital,
                 is_end_of_day=is_eod,
                 position_side=portfolio.open_position.side if portfolio.open_position else None,
+                position_entry_price=(
+                    float(portfolio.open_position.entry_price) if portfolio.open_position else None
+                ),
+                position_stop_loss=(
+                    float(portfolio.open_position.stop_loss) if portfolio.open_position else None
+                ),
             )
             signal = self.strategy.generate_signal(row, context)
 

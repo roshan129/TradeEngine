@@ -60,7 +60,9 @@ class MarketDataProcessor:
         clean_df = clean_df.sort_values("timestamp", ascending=True).reset_index(drop=True)
 
         before_count = len(clean_df)
-        clean_df = clean_df.drop_duplicates(subset=["timestamp"], keep="last").reset_index(drop=True)
+        clean_df = clean_df.drop_duplicates(subset=["timestamp"], keep="last").reset_index(
+            drop=True
+        )
         removed_count = before_count - len(clean_df)
         if removed_count > 0:
             logger.info("[DATA_INFO] Removed %s duplicate candles", removed_count)
@@ -192,14 +194,14 @@ class MarketDataProcessor:
 
         return clean_df[valid_mask].reset_index(drop=True)
 
-    def full_clean_pipeline(self, df: pd.DataFrame) -> pd.DataFrame:
+    def full_clean_pipeline(self, df: pd.DataFrame, timeframe_minutes: int = 5) -> pd.DataFrame:
         """Run full deterministic cleaning pipeline and enforce output contract."""
         clean_df = self.validate_structure(df)
         clean_df = self.sort_and_deduplicate(clean_df)
         clean_df = self.normalize_timestamp(clean_df)
         clean_df = self.cast_types(clean_df)
         clean_df = self.validate_logical_candles(clean_df)
-        clean_df = self.validate_intervals(clean_df, timeframe_minutes=5)
+        clean_df = self.validate_intervals(clean_df, timeframe_minutes=timeframe_minutes)
 
         if clean_df["timestamp"].duplicated().any():
             msg = "Pipeline output contains duplicate timestamps"
@@ -225,7 +227,10 @@ class MarketDataProcessor:
                 continue
 
             if str(clean_df[col].dtype) != expected_dtype:
-                msg = f"Pipeline output column '{col}' has dtype {clean_df[col].dtype}, expected {expected_dtype}"
+                msg = (
+                    f"Pipeline output column '{col}' has dtype {clean_df[col].dtype}, "
+                    f"expected {expected_dtype}"
+                )
                 logger.error("[DATA_ERROR] %s", msg)
                 raise DataSchemaError(msg)
 

@@ -4,6 +4,7 @@ import pandas as pd
 
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    OneMinuteVwapEma9ScalpStrategy,
     StrategyContext,
     VwapRsiMeanReversionStrategy,
 )
@@ -149,3 +150,50 @@ def test_vwap_rsi_mean_reversion_can_reverse_signals() -> None:
 
     long_setup_row = pd.Series({"close": 99.0, "vwap": 100.0, "rsi": 30.0})
     assert strategy.generate_signal(long_setup_row, flat_context) == "SHORT"
+
+
+def test_one_minute_scalp_strategy_entry_and_tp_exit() -> None:
+    strategy = OneMinuteVwapEma9ScalpStrategy(allow_shorts=True, take_profit_mode="rr")
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    entry_row = pd.Series(
+        {
+            "open": 100.0,
+            "high": 100.8,
+            "low": 99.95,
+            "close": 100.5,
+            "vwap": 100.1,
+            "ema9": 100.2,
+            "volume": 1800.0,
+            "rolling_volume_avg": 1000.0,
+            "atr": 0.5,
+        }
+    )
+    assert strategy.generate_signal(entry_row, flat_context) == "BUY"
+
+    in_pos_context = StrategyContext(
+        in_position=True,
+        available_capital=90_000.0,
+        is_end_of_day=False,
+        position_side="LONG",
+        position_entry_price=100.0,
+        position_stop_loss=99.75,
+    )
+    tp_row = pd.Series(
+        {
+            "open": 100.3,
+            "high": 100.7,
+            "low": 100.2,
+            "close": 100.4,
+            "vwap": 100.2,
+            "ema9": 100.3,
+            "volume": 1500.0,
+            "rolling_volume_avg": 1000.0,
+            "atr": 0.5,
+        }
+    )
+    # Risk=0.25; RR target=100 + 1.2*0.25 = 100.3 => SELL
+    assert strategy.generate_signal(tp_row, in_pos_context) == "SELL"

@@ -43,12 +43,27 @@ class HistoricalDataService:
         to_ist: datetime,
     ) -> list[Candle]:
         """Fetch full 5-minute candles for a date range without local row-cap trimming."""
+        return self.get_candles_between(
+            symbol=symbol,
+            interval="5minute",
+            from_ist=from_ist,
+            to_ist=to_ist,
+        )
+
+    def get_candles_between(
+        self,
+        symbol: str,
+        interval: str,
+        from_ist: datetime,
+        to_ist: datetime,
+    ) -> list[Candle]:
+        """Fetch full candles for a date range without local row-cap trimming."""
         if to_ist < from_ist:
             raise ValueError("to_ist must be >= from_ist")
 
         raw = self._client.fetch_historical_candles(
             instrument_key=symbol,
-            interval="5minute",
+            interval=interval,
             from_datetime=from_ist.astimezone(UTC),
             to_datetime=to_ist.astimezone(UTC),
         )

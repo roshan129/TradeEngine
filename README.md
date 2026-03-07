@@ -16,6 +16,7 @@ Live order execution and DB persistence are still out of scope.
 - Multiple strategies:
   - `ema_rsi` (trend + momentum baseline)
   - `vwap_rsi_reversion` (mean reversion baseline)
+  - `one_minute_vwap_ema9_scalp` (VWAP+EMA9 pullback scalp with volume confirmation)
 - Candle-by-candle event-driven backtest loop (no vectorized leakage)
 - Single-position portfolio model with dynamic ATR-based position sizing
 - Stop loss, strategy exits, and end-of-day exits
@@ -114,6 +115,7 @@ TradeEngine/
     dev.sh
     export_features_csv.py
     export_features_history.py
+    export_features_1m.py
     feature_validation_report.py
     run_backtest.py
     build_ml_dataset.py
@@ -181,6 +183,17 @@ Optional:
 Example:
 - `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_output.csv --raw-output raw_history_ohlcv.csv`
 
+## Export Multi-Month 1-Minute Feature History
+
+Fetch historical 1-minute candles in date chunks, stitch deterministically, clean with 1-minute interval validation, compute features, and add `ema9`:
+
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_1m.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_1m_output.csv`
+
+Optional:
+- `--symbol NSE_EQ|INE848E01016` (or uses `UPSTOX_INSTRUMENT_KEY`)
+- `--raw-output raw_history_1m_ohlcv.csv`
+- `--pause-seconds 0.2`
+
 ## Validate Indicators Against Reference CSV
 
 Use comparison report script:
@@ -234,6 +247,16 @@ VWAP+RSI reversion strategy commands:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --allow-shorts`
 - Reversed signals:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --reverse-signals`
+
+One-minute VWAP+EMA9 scalp strategy commands:
+- Long-only:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp`
+- Long+Short:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --allow-shorts`
+- Reversed signals:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --reverse-signals`
+- ATR take-profit mode:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --scalp-tp-mode atr`
 
 Build ML dataset:
 - `PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py --input feature_history_output.csv --output ml_dataset.csv`
