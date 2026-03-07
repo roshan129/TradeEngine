@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import time
 
 import pandas as pd
 
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     Strategy,
     VwapRsiMeanReversionStrategy,
@@ -39,7 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--brokerage-pct", type=float, default=0.0003)
     parser.add_argument(
         "--strategy",
-        choices=["ema_rsi", "vwap_rsi_reversion", "one_minute_vwap_ema9_scalp"],
+        choices=[
+            "ema_rsi",
+            "vwap_rsi_reversion",
+            "one_minute_vwap_ema9_scalp",
+            "one_minute_vwap_ema9_icici",
+        ],
         default="ema_rsi",
         help="Strategy to run (default: ema_rsi)",
     )
@@ -59,7 +66,40 @@ def parse_args() -> argparse.Namespace:
         default="rr",
         help="Take-profit mode for one_minute_vwap_ema9_scalp (default: rr)",
     )
+    parser.add_argument(
+        "--max-entries-per-day",
+        type=int,
+        default=0,
+        help="Limit number of new entries per day (0 means unlimited)",
+    )
+    parser.add_argument(
+        "--icici-volume-multiplier",
+        type=float,
+        default=1.8,
+        help="Volume spike multiplier for one_minute_vwap_ema9_icici (default: 1.8)",
+    )
+    parser.add_argument(
+        "--icici-risk-reward",
+        type=float,
+        default=1.5,
+        help="Risk-reward multiple for one_minute_vwap_ema9_icici when tp-mode=rr (default: 1.5)",
+    )
+    parser.add_argument(
+        "--icici-session-end",
+        default="14:45",
+        help="Session end time for one_minute_vwap_ema9_icici in HH:MM (default: 14:45)",
+    )
     return parser.parse_args()
+
+
+def _parse_hhmm(value: str) -> time:
+    try:
+        hour_text, minute_text = value.split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+        return time(hour=hour, minute=minute)
+    except Exception as exc:  # pragma: no cover - defensive CLI parse
+        raise ValueError(f"Invalid HH:MM time value: {value}") from exc
 
 
 def main() -> int:
@@ -82,6 +122,15 @@ def main() -> int:
             reverse_signals=args.reverse_signals,
             take_profit_mode=args.scalp_tp_mode,
         )
+    elif args.strategy == "one_minute_vwap_ema9_icici":
+        strategy = OneMinuteVwapEma9IciciFocusedStrategy(
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+            take_profit_mode=args.scalp_tp_mode,
+            volume_spike_multiplier=args.icici_volume_multiplier,
+            risk_reward_multiple=args.icici_risk_reward,
+            session_end=_parse_hhmm(args.icici_session_end),
+        )
     else:
         strategy = BaselineEmaRsiStrategy(
             allow_shorts=short_enabled,
@@ -96,6 +145,7 @@ def main() -> int:
         brokerage_fixed=args.brokerage_fixed,
         brokerage_pct=args.brokerage_pct,
         allow_shorts=short_enabled,
+        max_entries_per_day=(args.max_entries_per_day if args.max_entries_per_day > 0 else None),
     )
 
     backtester = Backtester(strategy=strategy, config=config)

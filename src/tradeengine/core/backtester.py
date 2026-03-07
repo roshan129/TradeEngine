@@ -24,6 +24,7 @@ class BacktestConfig:
     brokerage_pct: float = 0.0003
     force_end_of_day_exit: bool = True
     allow_shorts: bool = False
+    max_entries_per_day: int | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,7 @@ class Backtester:
         )
 
         equity_rows: list[dict[str, object]] = []
+        entries_per_day: dict[object, int] = {}
 
         for i in range(len(candles)):
             row = candles.iloc[i]
@@ -165,7 +167,23 @@ class Backtester:
                     )
                     continue
 
+                daily_limit_enabled = (
+                    self.config.max_entries_per_day is not None
+                    and self.config.max_entries_per_day > 0
+                )
                 if signal == "BUY":
+                    if daily_limit_enabled:
+                        day_key = timestamp.date()
+                        if entries_per_day.get(day_key, 0) >= self.config.max_entries_per_day:
+                            equity_rows.append(
+                                {
+                                    "timestamp": timestamp,
+                                    "capital": float(portfolio.capital),
+                                    "equity": float(portfolio.mark_to_market_equity(close)),
+                                    "in_position": portfolio.has_open_position,
+                                }
+                            )
+                            continue
                     stop_loss = self.strategy.entry_stop_loss(
                         row=row,
                         signal=signal,
@@ -180,7 +198,7 @@ class Backtester:
                             side="LONG",
                         )
                         if quantity > 0:
-                            portfolio.enter_position(
+                            entered = portfolio.enter_position(
                                 side="LONG",
                                 timestamp=timestamp,
                                 candle_close=close,
@@ -189,7 +207,22 @@ class Backtester:
                                 entry_index=i,
                                 risk_amount=risk_amount,
                             )
+                            if entered and self.config.max_entries_per_day is not None:
+                                day_key = timestamp.date()
+                                entries_per_day[day_key] = entries_per_day.get(day_key, 0) + 1
                 elif signal == "SHORT" and self.config.allow_shorts:
+                    if daily_limit_enabled:
+                        day_key = timestamp.date()
+                        if entries_per_day.get(day_key, 0) >= self.config.max_entries_per_day:
+                            equity_rows.append(
+                                {
+                                    "timestamp": timestamp,
+                                    "capital": float(portfolio.capital),
+                                    "equity": float(portfolio.mark_to_market_equity(close)),
+                                    "in_position": portfolio.has_open_position,
+                                }
+                            )
+                            continue
                     stop_loss = self.strategy.entry_stop_loss(
                         row=row,
                         signal=signal,
@@ -204,7 +237,7 @@ class Backtester:
                             side="SHORT",
                         )
                         if quantity > 0:
-                            portfolio.enter_position(
+                            entered = portfolio.enter_position(
                                 side="SHORT",
                                 timestamp=timestamp,
                                 candle_close=close,
@@ -213,6 +246,9 @@ class Backtester:
                                 entry_index=i,
                                 risk_amount=risk_amount,
                             )
+                            if entered and self.config.max_entries_per_day is not None:
+                                day_key = timestamp.date()
+                                entries_per_day[day_key] = entries_per_day.get(day_key, 0) + 1
             else:
                 if signal in {"SELL", "COVER"}:
                     portfolio.exit_position(

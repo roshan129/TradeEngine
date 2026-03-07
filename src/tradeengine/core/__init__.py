@@ -16,6 +16,7 @@ from tradeengine.core.metrics import (
 from tradeengine.core.portfolio import CostModel, Portfolio, PortfolioError, Position, TradeRecord
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     Signal,
     Strategy,
@@ -34,6 +35,7 @@ __all__ = [
     "BaselineEmaRsiStrategy",
     "VwapRsiMeanReversionStrategy",
     "OneMinuteVwapEma9ScalpStrategy",
+    "OneMinuteVwapEma9IciciFocusedStrategy",
     "CostModel",
     "Position",
     "TradeRecord",

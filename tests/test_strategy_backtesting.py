@@ -4,6 +4,7 @@ import pandas as pd
 
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     StrategyContext,
     VwapRsiMeanReversionStrategy,
@@ -197,3 +198,24 @@ def test_one_minute_scalp_strategy_entry_and_tp_exit() -> None:
     )
     # Risk=0.25; RR target=100 + 1.2*0.25 = 100.3 => SELL
     assert strategy.generate_signal(tp_row, in_pos_context) == "SELL"
+
+
+def test_one_minute_icici_strategy_respects_session_filter() -> None:
+    strategy = OneMinuteVwapEma9IciciFocusedStrategy()
+    context = StrategyContext(in_position=False, available_capital=100_000.0, is_end_of_day=False)
+    out_of_session_row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-01T09:16:00+05:30"),
+            "open": 100.0,
+            "high": 100.4,
+            "low": 99.9,
+            "close": 100.2,
+            "vwap": 100.0,
+            "ema9": 100.1,
+            "atr": 0.3,
+            "bb_width": 0.01,
+            "volume": 2500.0,
+            "rolling_volume_avg": 1000.0,
+        }
+    )
+    assert strategy.generate_signal(out_of_session_row, context) == "HOLD"

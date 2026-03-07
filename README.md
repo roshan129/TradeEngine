@@ -258,6 +258,14 @@ One-minute VWAP+EMA9 scalp strategy commands:
 - ATR take-profit mode:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --scalp-tp-mode atr`
 
+ICICI-focused one-minute strategy commands:
+- Long+Short with stricter filters:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts`
+- Apply per-day entry cap:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --max-entries-per-day 6`
+- ATR take-profit mode:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --scalp-tp-mode atr`
+
 Build ML dataset:
 - `PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py --input feature_history_output.csv --output ml_dataset.csv`
 

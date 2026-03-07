@@ -6,6 +6,7 @@ import pytest
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     VwapRsiMeanReversionStrategy,
 )
@@ -297,3 +298,40 @@ def test_backtester_runs_one_minute_scalp_strategy() -> None:
     assert len(result.trades) == 1
     trade = result.trades.iloc[0]
     assert trade["side"] == "LONG"
+
+
+def test_backtester_honors_max_entries_per_day_limit() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-01T09:21:00+05:30"),
+                pd.Timestamp("2026-01-01T09:22:00+05:30"),
+                pd.Timestamp("2026-01-01T09:23:00+05:30"),
+                pd.Timestamp("2026-01-01T09:24:00+05:30"),
+            ],
+            "open": [100.0, 100.2, 100.1, 100.3],
+            "high": [100.5, 100.6, 100.7, 100.8],
+            "low": [99.9, 100.0, 100.0, 100.1],
+            "close": [100.3, 100.1, 100.5, 100.4],
+            "vwap": [100.0, 100.0, 100.0, 100.0],
+            "ema9": [100.1, 100.1, 100.1, 100.1],
+            "atr": [0.3, 0.3, 0.3, 0.3],
+            "bb_width": [0.02, 0.02, 0.02, 0.02],
+            "volume": [2500.0, 2500.0, 2500.0, 2500.0],
+            "rolling_volume_avg": [1000.0, 1000.0, 1000.0, 1000.0],
+        }
+    )
+    cfg = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=False,
+        max_entries_per_day=1,
+    )
+    result = Backtester(
+        strategy=OneMinuteVwapEma9IciciFocusedStrategy(allow_shorts=False, take_profit_mode="rr"),
+        config=cfg,
+    ).run(df)
+    assert len(result.trades) <= 1
