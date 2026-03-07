@@ -1,90 +1,70 @@
 # Sprint 5 - Labeling Engine & AI Dataset Builder
 
-## Sprint Goal
-Create a deterministic labeling system that converts the engineered feature dataset into an ML-ready dataset by attaching future-outcome labels.
+## Status
+- Completed
+- Deterministic labeling + dataset build flow implemented and tested.
 
-Final output:
+## Sprint Goal
+Convert engineered feature data into ML-ready supervised datasets:
+- features at time `t`
+- labels based on forward outcome after `t`
+
+Primary output:
 - `ml_dataset.csv`
 
-Each row should contain:
-- features at time `t`
-- label describing what happened after time `t`
-
-## Why Labeling Matters
-Current dataset includes indicators/features/market state but not outcome quality.
-Labeling answers:
-- what happened after this candle?
-- did price move up/down?
-- did it move enough to trade?
-
-## Module Structure
-Create:
+## Implemented Modules
 
 ```text
 src/tradeengine/ml/
+  __init__.py
   labeling.py
   dataset_builder.py
+scripts/
+  build_ml_dataset.py
+tests/
+  test_labeling.py
 ```
 
-## Story 1 - Labeling Engine
-File:
-- `src/tradeengine/ml/labeling.py`
+## Story-by-Story Implementation
 
-Class:
-- `LabelGenerator`
+### Story 1 - Labeling Engine
+Implemented in `LabelGenerator` (`src/tradeengine/ml/labeling.py`):
+- `generate_labels(...)`
+  - uses `close.shift(-horizon)`
+  - computes `future_close`, `future_return`
+  - label rules:
+    - `BUY` if return > buy threshold
+    - `SELL` if return < sell threshold
+    - else `HOLD`
+  - drops rows without future data
 
-Core API:
-- `generate_labels(df, horizon=5, buy_threshold=0.003, sell_threshold=-0.003)`
+### Story 2 - Multi-Horizon Labels
+Implemented:
+- `generate_multi_horizon_returns(...)`
+- Adds:
+  - `future_return_5`
+  - `future_return_10`
+  - `future_return_20`
 
-Labeling logic:
-- `future_close = close.shift(-horizon)`
-- `future_return = (future_close - close) / close`
-- `BUY` if `future_return > buy_threshold`
-- `SELL` if `future_return < sell_threshold`
-- else `HOLD`
-- drop rows where future data is unavailable
+### Story 3 - Volatility-Adjusted Labels
+Implemented:
+- `generate_volatility_adjusted_labels(...)`
+- Uses ATR-scaled future move threshold (`atr_multiplier * atr`)
 
-Output columns:
-- `future_close`
-- `future_return`
-- `label`
+### Story 4 - Dataset Builder
+Implemented `DatasetBuilder` (`src/tradeengine/ml/dataset_builder.py`):
+- Orchestrates multi-horizon returns + label generation
+- Supports fixed-threshold and ATR-adjusted label modes
+- Drops leakage columns from model input output:
+  - `future_close`
+  - `future_return`
+  - `future_move`
 
-## Story 2 - Multi-Horizon Labels
-Generate multiple future-return columns:
-- `future_return_5`
-- `future_return_10`
-- `future_return_20`
-
-## Story 3 - Volatility-Adjusted Labels
-Add ATR-scaled thresholds (optional mode):
-- `BUY` if future move > `k * ATR`
-- `SELL` if future move < `-k * ATR`
-
-## Story 4 - Dataset Builder
-File:
-- `src/tradeengine/ml/dataset_builder.py`
-
-Class:
-- `DatasetBuilder`
-
-API:
-- `build_dataset(df)`
-
-Pipeline:
-1. load feature dataset
-2. generate labels
-3. remove leakage columns
-4. return ML dataset
-
-Leakage columns to remove from final model features:
-- `future_close`
-- `future_return`
-
-## Story 5 - Dataset Export Script
-Create:
+### Story 5 - Dataset Export Script
+Implemented script:
 - `scripts/build_ml_dataset.py`
 
-CLI example:
+Example:
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py \
@@ -92,47 +72,77 @@ PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py \
   --output ml_dataset.csv
 ```
 
-## Story 6 - Dataset Validation
-Validation contract:
+### Story 6 - Dataset Validation
+Implemented validation contract in `DatasetBuilder`:
 - no NaN
-- no infinite values
+- no non-finite numeric values
 - sorted timestamps
-- no duplicate timestamps
+- unique timestamps
 
-## Story 7 - Dataset Statistics
-Output summary counts:
-- BUY
-- SELL
-- HOLD
+### Story 7 - Dataset Statistics
+Implemented:
+- `DatasetBuilder.label_counts(...)`
+- Outputs BUY/SELL/HOLD counts in CLI summary
 
-## Story 8 - Unit Tests
-Create:
+### Story 8 - Unit Tests
+Implemented:
 - `tests/test_labeling.py`
 
-Must test:
-- future-return calculation
-- label assignment
-- horizon-shift correctness
-- leakage safety
+Coverage includes:
+- future-return correctness
+- label assignment correctness
+- horizon shift correctness
+- volatility-adjusted labels
+- no leakage output columns
+- schema checks
+- sorted/duplicate timestamp checks
 
-## Story 9 - ML Dataset Schema Contract
-Required columns include at least:
-- `timestamp`
-- `open`, `high`, `low`, `close`, `volume`
-- `ema20`, `ema50`, `ema200`
-- `rsi`, `macd`, `macd_signal`, `macd_hist`
-- `vwap`, `atr`, `bb_width`, `rolling_volume_avg`
+### Story 9 - Schema Contract
+Schema contract enforced in `DatasetBuilder.REQUIRED_SCHEMA_COLUMNS`, including:
+- OHLCV core
+- major engineered indicators
 - `future_return_5`
 - `label`
 
-## Deliverables
-Sprint 5 done when repository contains:
-- labeling engine
-- dataset builder
-- export script
-- validation checks
-- dataset statistics
-- unit tests
+## Output Example
 
-Output:
+```text
+timestamp,ema20,ema50,rsi,atr,future_return_5,label
+2026-01-02 10:05:00+05:30,101.0,100.0,58.0,1.4,0.004,BUY
+```
+
+## CLI Options Implemented
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py \
+  --input feature_history_output.csv \
+  --output ml_dataset.csv \
+  --horizons 5,10,20 \
+  --label-horizon 5 \
+  --buy-threshold 0.003 \
+  --sell-threshold -0.003
+```
+
+ATR-adjusted labels:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py \
+  --input feature_history_output.csv \
+  --output ml_dataset.csv \
+  --use-volatility-adjusted-labels \
+  --atr-multiplier 0.5
+```
+
+## Deliverables Achieved
+- labeling engine
+- multi-horizon labels
+- volatility-adjusted label mode
+- dataset builder
+- export CLI
+- validation checks
+- class-balance stats
+- unit tests
+- strict schema contract
+
+Output file:
 - `ml_dataset.csv`
