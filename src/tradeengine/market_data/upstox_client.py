@@ -26,6 +26,7 @@ class UpstoxClient:
         backoff_seconds: float = 1.0,
         session: requests.Session | None = None,
     ) -> None:
+        """Create resilient HTTP client for Upstox market-data endpoints."""
         self._auth = auth
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
@@ -40,6 +41,21 @@ class UpstoxClient:
         from_datetime: datetime,
         to_datetime: datetime,
     ) -> dict[str, Any]:
+        """Fetch historical candles for a date range from Upstox V3 API."""
+        unit, interval_value = self._parse_interval(interval)
+        to_date = to_datetime.date().isoformat()
+        from_date = from_datetime.date().isoformat()
+        path = f"/historical-candle/{instrument_key}/{unit}/{interval_value}/{to_date}/{from_date}"
+        return self._fetch_json(path=path)
+
+    def fetch_intraday_candles(self, instrument_key: str, interval: str) -> dict[str, Any]:
+        """Fetch latest intraday candles (current session) from Upstox V3 API."""
+        unit, interval_value = self._parse_interval(interval)
+        path = f"/historical-candle/intraday/{instrument_key}/{unit}/{interval_value}"
+        return self._fetch_json(path=path)
+
+    def _fetch_json(self, path: str) -> dict[str, Any]:
+        """Shared request executor with retry/backoff and response validation."""
         try:
             token = self._auth.access_token
         except UpstoxAuthError as exc:
@@ -49,11 +65,6 @@ class UpstoxClient:
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
         }
-
-        unit, interval_value = self._parse_interval(interval)
-        to_date = to_datetime.date().isoformat()
-        from_date = from_datetime.date().isoformat()
-        path = f"/historical-candle/{instrument_key}/{unit}/{interval_value}/{to_date}/{from_date}"
 
         for attempt in range(1, self._max_retries + 1):
             try:
@@ -110,17 +121,19 @@ class UpstoxClient:
             try:
                 return response.json()
             except ValueError as exc:
-                logger.exception("Received malformed JSON from Upstox historical endpoint")
-                raise UpstoxClientError("Malformed response from Upstox historical endpoint") from exc
+                logger.exception("Received malformed JSON from Upstox endpoint path=%s", path)
+                raise UpstoxClientError("Malformed response from Upstox endpoint") from exc
 
-        raise UpstoxClientError("Historical candle fetch failed unexpectedly")
+        raise UpstoxClientError("Upstox API fetch failed unexpectedly")
 
     def _backoff(self, attempt: int) -> None:
+        """Sleep using exponential backoff based on retry attempt number."""
         wait_seconds = self._backoff_seconds * (2 ** (attempt - 1))
         time.sleep(wait_seconds)
 
     @staticmethod
     def _parse_interval(interval: str) -> tuple[str, str]:
+        """Convert local interval format (e.g., 5minute) to API path segments."""
         if interval.endswith("minute"):
             count = interval.replace("minute", "")
             if count.isdigit():

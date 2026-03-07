@@ -32,6 +32,7 @@ class UpstoxAuth:
         timeout_seconds: int = 15,
         session: requests.Session | None = None,
     ) -> None:
+        """Initialize OAuth helper with app credentials and request settings."""
         self._credentials = credentials
         self._timeout_seconds = timeout_seconds
         self._session = session or requests.Session()
@@ -39,6 +40,7 @@ class UpstoxAuth:
         self._expires_at_utc: datetime | None = None
 
     def generate_login_url(self, state: str | None = None) -> str:
+        """Build Upstox OAuth login URL that returns an authorization code."""
         params: dict[str, str] = {
             "response_type": "code",
             "client_id": self._credentials.api_key,
@@ -49,6 +51,7 @@ class UpstoxAuth:
         return f"{self.AUTH_BASE_URL}?{urlencode(params)}"
 
     def exchange_auth_code_for_access_token(self, auth_code: str) -> str:
+        """Exchange one-time auth code for bearer token and cache it in memory."""
         payload = {
             "code": auth_code,
             "client_id": self._credentials.api_key,
@@ -92,6 +95,7 @@ class UpstoxAuth:
         return token
 
     def set_access_token(self, token: str, expires_in_seconds: Any | None = None) -> None:
+        """Manually set token (for sandbox/manual flows) with optional expiry."""
         self._access_token = token
         self._expires_at_utc = None
         if isinstance(expires_in_seconds, int) and expires_in_seconds > 0:
@@ -99,6 +103,7 @@ class UpstoxAuth:
 
     @property
     def access_token(self) -> str:
+        """Return valid token or raise if missing/expired."""
         if self._access_token is None:
             raise UpstoxAuthError("Access token not available")
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta, time
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from tradeengine.market_data.models import Candle, normalize_candles
@@ -21,23 +21,63 @@ class HistoricalDataService:
         ist_timezone: str = "Asia/Kolkata",
         enforce_market_hours: bool = True,
     ) -> None:
+        """Initialize historical service with timezone and market-hours policy."""
         self._client = client
         self._ist_zone = ZoneInfo(ist_timezone)
         self._enforce_market_hours = enforce_market_hours
 
     def get_last_500_5min_candles(self, symbol: str) -> list[Candle]:
+        """Fetch last 500 five-minute candles with market-hours enforcement."""
         return self._fetch_last_500_5min_candles(
             symbol=symbol, enforce_market_hours=self._enforce_market_hours
         )
 
     def get_last_500_5min_candles_anytime(self, symbol: str) -> list[Candle]:
+        """Fetch last 500 five-minute candles regardless of market-hours state."""
         return self._fetch_last_500_5min_candles(symbol=symbol, enforce_market_hours=False)
 
+    def get_5min_candles_between(
+        self,
+        symbol: str,
+        from_ist: datetime,
+        to_ist: datetime,
+    ) -> list[Candle]:
+        """Fetch full 5-minute candles for a date range without local row-cap trimming."""
+        return self.get_candles_between(
+            symbol=symbol,
+            interval="5minute",
+            from_ist=from_ist,
+            to_ist=to_ist,
+        )
+
+    def get_candles_between(
+        self,
+        symbol: str,
+        interval: str,
+        from_ist: datetime,
+        to_ist: datetime,
+    ) -> list[Candle]:
+        """Fetch full candles for a date range without local row-cap trimming."""
+        if to_ist < from_ist:
+            raise ValueError("to_ist must be >= from_ist")
+
+        raw = self._client.fetch_historical_candles(
+            instrument_key=symbol,
+            interval=interval,
+            from_datetime=from_ist.astimezone(UTC),
+            to_datetime=to_ist.astimezone(UTC),
+        )
+        return normalize_candles(raw, timezone=str(self._ist_zone))
+
     def _fetch_last_500_5min_candles(self, symbol: str, enforce_market_hours: bool) -> list[Candle]:
+        """Internal fetch flow: historical + intraday merge -> normalize -> trim 500."""
         now_ist = datetime.now(self._ist_zone)
 
         if enforce_market_hours and not self._is_market_open(now_ist):
-            logger.warning("Market appears closed for IST timestamp=%s. Returning empty candles.", now_ist)
+            logger.warning(
+                "Market appears closed for IST timestamp=%s. Returning empty candles.",
+                now_ist,
+            )
             return []
 
         # Use a safe date window for 5-minute data, then trim to latest 500 candles.
@@ -48,13 +88,43 @@ class HistoricalDataService:
             from_datetime=from_ist.astimezone(UTC),
             to_datetime=now_ist.astimezone(UTC),
         )
-        candles = normalize_candles(raw, timezone=str(self._ist_zone))
+        intraday_raw: dict[str, object] = {}
+        try:
+            intraday_raw = self._client.fetch_intraday_candles(
+                instrument_key=symbol,
+                interval="5minute",
+            )
+        except Exception:
+            logger.warning(
+                "Unable to fetch intraday candles; proceeding with historical candles only"
+            )
+
+        merged_raw = self._merge_raw_payloads(raw, intraday_raw)
+        candles = normalize_candles(merged_raw, timezone=str(self._ist_zone))
         return candles[-self.TARGET_CANDLE_COUNT :]
 
     @staticmethod
     def _is_market_open(current_ist: datetime) -> bool:
+        """Check NSE/BSE regular market session window in IST."""
         if current_ist.weekday() >= 5:
             return False
         market_open = time(hour=9, minute=15)
         market_close = time(hour=15, minute=30)
         return market_open <= current_ist.time() <= market_close
+
+    @staticmethod
+    def _merge_raw_payloads(
+        historical_payload: dict[str, object],
+        intraday_payload: dict[str, object],
+    ) -> dict[str, object]:
+        """Combine candle arrays from historical and intraday payload structures."""
+        historical_candles = historical_payload.get("data", {}).get("candles", [])
+        intraday_candles = intraday_payload.get("data", {}).get("candles", [])
+
+        merged_candles: list[object] = []
+        if isinstance(historical_candles, list):
+            merged_candles.extend(historical_candles)
+        if isinstance(intraday_candles, list):
+            merged_candles.extend(intraday_candles)
+
+        return {"data": {"candles": merged_candles}}

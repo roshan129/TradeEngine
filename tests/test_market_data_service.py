@@ -30,6 +30,27 @@ class ManyCandlesClient:
         return {"data": {"candles": candles}}
 
 
+class MergeClient:
+    def fetch_historical_candles(self, **_: object) -> dict[str, object]:
+        return {
+            "data": {
+                "candles": [
+                    ["2026-03-03T05:20:00Z", 10.0, 11.0, 9.0, 10.5, 100],
+                    ["2026-03-03T05:25:00Z", 10.5, 11.5, 9.5, 11.0, 120],
+                ]
+            }
+        }
+
+    def fetch_intraday_candles(self, **_: object) -> dict[str, object]:
+        return {
+            "data": {
+                "candles": [
+                    ["2026-03-03T05:30:00Z", 11.0, 12.0, 10.8, 11.7, 150],
+                ]
+            }
+        }
+
+
 def test_anytime_method_bypasses_market_hours(monkeypatch) -> None:
     client = DummyClient()
     service = HistoricalDataService(client=client, enforce_market_hours=True)
@@ -54,3 +75,11 @@ def test_anytime_method_uses_client_response_without_market_hours_gate() -> None
     service = HistoricalDataService(client=ManyCandlesClient(), enforce_market_hours=True)
     candles = service.get_last_500_5min_candles_anytime(symbol="NSE_EQ|DUMMY")
     assert len(candles) == 500
+
+
+def test_service_merges_historical_and_intraday_candles() -> None:
+    service = HistoricalDataService(client=MergeClient(), enforce_market_hours=True)
+    candles = service.get_last_500_5min_candles_anytime(symbol="NSE_EQ|DUMMY")
+
+    assert len(candles) == 3
+    assert candles[-1].timestamp.isoformat().startswith("2026-03-03T11:00:00+05:30")

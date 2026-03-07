@@ -18,6 +18,7 @@ class Candle:
 
 
 def normalize_candles(raw_payload: dict[str, Any], timezone: str = "Asia/Kolkata") -> list[Candle]:
+    """Transform raw API candle JSON into sorted, deduplicated Candle objects."""
     candle_rows = raw_payload.get("data", {}).get("candles", [])
     if not isinstance(candle_rows, list) or len(candle_rows) == 0:
         return []
