@@ -52,6 +52,12 @@ def test_full_feature_pipeline_enforces_final_contract() -> None:
         "higher_high",
         "lower_low",
         "rolling_volume_avg",
+        "minute_of_day",
+        "minutes_since_open",
+        "session_progress",
+        "gap_percent",
+        "distance_from_open",
+        "distance_from_previous_close",
     }
 
     assert expected_cols.issubset(set(out_df.columns))

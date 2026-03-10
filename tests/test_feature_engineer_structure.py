@@ -61,3 +61,22 @@ def test_structure_numeric_features_are_finite_after_warmup() -> None:
     subset = out_df[["dist_ema20", "dist_vwap", "rolling_volume_avg"]].dropna()
     assert not subset.empty
     assert np.isfinite(subset.to_numpy()).all()
+
+
+def test_time_context_features_are_present_and_finite() -> None:
+    engineer = FeatureEngineer()
+    out_df = engineer.add_time_context_features(_structure_df())
+
+    cols = [
+        "minute_of_day",
+        "minutes_since_open",
+        "session_progress",
+        "gap_percent",
+        "distance_from_open",
+        "distance_from_previous_close",
+    ]
+    for col in cols:
+        assert col in out_df.columns
+
+    assert np.isfinite(out_df[cols].to_numpy()).all()
+    assert out_df["session_progress"].between(0.0, 1.0).all()

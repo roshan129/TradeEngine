@@ -9,6 +9,7 @@ import pandas as pd
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    MLSignalStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     Strategy,
@@ -44,6 +45,7 @@ def parse_args() -> argparse.Namespace:
         choices=[
             "ema_rsi",
             "vwap_rsi_reversion",
+            "ml_signal",
             "one_minute_vwap_ema9_scalp",
             "one_minute_vwap_ema9_icici",
         ],
@@ -89,6 +91,16 @@ def parse_args() -> argparse.Namespace:
         default="14:45",
         help="Session end time for one_minute_vwap_ema9_icici in HH:MM (default: 14:45)",
     )
+    parser.add_argument(
+        "--ml-entry-start",
+        default="09:20",
+        help="Entry window start for ml_signal strategy in HH:MM (default: 09:20)",
+    )
+    parser.add_argument(
+        "--ml-entry-end",
+        default="10:20",
+        help="Entry window end for ml_signal strategy in HH:MM (default: 10:20)",
+    )
     return parser.parse_args()
 
 
@@ -115,6 +127,13 @@ def main() -> int:
         strategy = VwapRsiMeanReversionStrategy(
             allow_shorts=short_enabled,
             reverse_signals=args.reverse_signals,
+        )
+    elif args.strategy == "ml_signal":
+        strategy = MLSignalStrategy(
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+            entry_session_start=_parse_hhmm(args.ml_entry_start),
+            entry_session_end=_parse_hhmm(args.ml_entry_end),
         )
     elif args.strategy == "one_minute_vwap_ema9_scalp":
         strategy = OneMinuteVwapEma9ScalpStrategy(

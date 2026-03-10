@@ -8,6 +8,7 @@ Current implementation includes:
 - Sprint 3: deterministic feature engineering pipeline for indicators and context features
 - Sprint 4: deterministic, event-driven backtesting engine
 - Sprint 5: deterministic labeling engine and ML dataset builder
+- Sprint 6: ML model training, evaluation, registry, prediction, and ML-driven backtests
 
 Live order execution and DB persistence are still out of scope.
 
@@ -51,6 +52,22 @@ Main classes:
 - `tradeengine.ml.labeling.LabelGenerator`
 - `tradeengine.ml.dataset_builder.DatasetBuilder`
 
+## Sprint 6: ML Training & Inference
+- Feature config to prevent drift (`tradeengine.ml.models.feature_config`)
+- XGBoost multi-class training with time-based split
+- Class-balanced sample weights
+- Evaluation metrics (accuracy, macro precision/recall/F1, confusion matrix, feature importance)
+- Model registry (artifact + metadata JSON)
+- Predictor with probability outputs
+- CLI scripts: training, evaluation, prediction, walk-forward, OOS validation, OOS tuning
+- ML-driven backtesting strategy (`ml_signal`) with entry time gate (default 09:20–10:20)
+
+Main classes:
+- `tradeengine.ml.models.trainer.ModelTrainer`
+- `tradeengine.ml.models.predictor.ModelPredictor`
+- `tradeengine.ml.models.registry.ModelRegistry`
+- `tradeengine.ml.models.evaluation.evaluate_classification`
+
 ## Implemented Scope
 
 ### Sprint 1: Market Data Integration
@@ -78,6 +95,8 @@ Main class:
 - Momentum: `rsi`, `macd`, `macd_signal`, `macd_hist`, `roc`
 - Volatility: `atr`, `bb_width`, `rolling_std`
 - Structure/context: `dist_ema20`, `dist_vwap`, `higher_high`, `lower_low`, `rolling_volume_avg`
+- Time/regime: `minute_of_day`, `minutes_since_open`, `session_progress`
+- Opening behavior: `gap_percent`, `distance_from_open`, `distance_from_previous_close`
 - Warmup handling (`dropna` after indicator generation)
 - Full feature contract checks (no NaN, no duplicates, sorted timestamps, finite numerics)
 
@@ -109,6 +128,12 @@ TradeEngine/
     ml/
       labeling.py
       dataset_builder.py
+      models/
+        trainer.py
+        predictor.py
+        registry.py
+        evaluation.py
+        feature_config.py
     config.py
     main.py
   scripts/
@@ -119,6 +144,12 @@ TradeEngine/
     feature_validation_report.py
     run_backtest.py
     build_ml_dataset.py
+    train_model.py
+    evaluate_model.py
+    predict_from_model.py
+    walk_forward_evaluate.py
+    oos_validate_ml.py
+    oos_tune_ml.py
   tests/
     test_*.py
   .env.example
@@ -264,7 +295,12 @@ ICICI-focused one-minute strategy commands:
 - Apply per-day entry cap:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --max-entries-per-day 6`
 - ATR take-profit mode:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --scalp-tp-mode atr`
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --scalp-tp-mode atr`
+
+ML-driven strategy (uses `prediction` column):
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts`
+- Configure entry window:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts --ml-entry-start 09:20 --ml-entry-end 10:20`
 
 Build ML dataset:
 - `PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py --input feature_history_output.csv --output ml_dataset.csv`
@@ -276,3 +312,21 @@ Optional ML flags:
 - `--sell-threshold -0.003`
 - `--use-volatility-adjusted-labels`
 - `--atr-multiplier 0.5`
+
+Train ML model:
+- `PYTHONPATH=src .venv/bin/python scripts/train_model.py --dataset ml_dataset.csv --output models/model_v1.pkl --model-version v1`
+
+Evaluate ML model:
+- `PYTHONPATH=src .venv/bin/python scripts/evaluate_model.py --dataset ml_dataset.csv --model models/model_v1.pkl`
+
+Walk-forward evaluation:
+- `PYTHONPATH=src .venv/bin/python scripts/walk_forward_evaluate.py --dataset ml_dataset.csv --model models/model_v1.pkl`
+
+Generate predictions with gating:
+- `PYTHONPATH=src .venv/bin/python scripts/predict_from_model.py --model models/model_v1.pkl --input feature_validation_output.csv --output predictions.csv --buy-threshold-proba 0.45 --sell-threshold-proba 0.55`
+
+OOS validation (9m train / 3m test):
+- `PYTHONPATH=src .venv/bin/python scripts/oos_validate_ml.py --features feature_history_12m_5m_v2.csv --model-output models/model_12m_5m_oos_9m3m_v2.pkl --output-dir oos_results_12m_5m_v2`
+
+OOS tuning (threshold + risk + stop):
+- `PYTHONPATH=src .venv/bin/python scripts/oos_tune_ml.py --features feature_history_12m_5m_v2.csv --output-dir oos_tune_results_12m_5m_v2 --model-output models/model_12m_5m_tuned_oos_v2.pkl`

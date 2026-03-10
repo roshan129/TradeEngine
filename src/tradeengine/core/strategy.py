@@ -169,6 +169,79 @@ class VwapRsiMeanReversionStrategy:
 
 
 @dataclass(frozen=True)
+class MLSignalStrategy:
+    """Strategy that executes model-provided BUY/SELL/HOLD predictions."""
+
+    required_columns: tuple[str, ...] = ("prediction", "atr")
+    non_numeric_columns: tuple[str, ...] = ("prediction",)
+    allow_shorts: bool = False
+    reverse_signals: bool = False
+    entry_session_start: time = time(hour=9, minute=20)
+    entry_session_end: time = time(hour=10, minute=20)
+
+    def _in_entry_window(self, row: pd.Series) -> bool:
+        ts = row.get("timestamp")
+        if ts is None:
+            return True
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return True
+        candle_time = timestamp.time()
+        return self.entry_session_start <= candle_time <= self.entry_session_end
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        raw_prediction = str(row.get("prediction", "HOLD")).upper()
+        if raw_prediction not in {"BUY", "SELL", "HOLD"}:
+            signal: Signal = "HOLD"
+        elif raw_prediction == "BUY":
+            signal = "BUY"
+        elif raw_prediction == "SELL":
+            signal = "SELL"
+        else:
+            signal = "HOLD"
+
+        if context.in_position:
+            if context.position_side == "LONG":
+                if signal == "SELL" or context.is_end_of_day:
+                    signal = "SELL"
+                else:
+                    signal = "HOLD"
+            elif context.position_side == "SHORT":
+                if signal == "BUY" or context.is_end_of_day:
+                    signal = "COVER"
+                else:
+                    signal = "HOLD"
+        else:
+            if not self._in_entry_window(row):
+                signal = "HOLD"
+            if signal == "SELL":
+                signal = "SHORT" if self.allow_shorts else "HOLD"
+
+        if self.reverse_signals:
+            return reverse_signal(signal)
+        return signal
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        close = float(row.get("close", float("nan")))
+        atr = float(row.get("atr", float("nan")))
+        if pd.isna(close) or pd.isna(atr):
+            return None
+        if close <= 0 or atr <= 0:
+            return None
+
+        if signal == "BUY":
+            return close - (atr * stop_atr_multiple)
+        if signal == "SHORT":
+            return close + (atr * stop_atr_multiple)
+        return None
+
+
+@dataclass(frozen=True)
 class OneMinuteVwapEma9ScalpStrategy:
     """1-minute VWAP+EMA9 scalping strategy with volume confirmation."""
 

@@ -1,0 +1,40 @@
+{
+  "model_version": "oos_9m_train_3m_test",
+  "training_rows": 13513,
+  "test_rows": 4625,
+  "train_period_start": "2025-03-12 13:20:00+05:30",
+  "train_period_end": "2025-12-05 15:25:00+05:30",
+  "test_period_start": "2025-12-08 09:15:00+05:30",
+  "test_period_end": "2026-03-06 15:25:00+05:30",
+  "training_date": "2026-03-09",
+  "features": [
+    "ema20",
+    "ema50",
+    "ema200",
+    "vwap",
+    "rsi",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "roc",
+    "atr",
+    "bb_width",
+    "rolling_std",
+    "dist_ema20",
+    "dist_vwap",
+    "higher_high",
+    "lower_low",
+    "rolling_volume_avg",
+    "minute_of_day",
+    "minutes_since_open",
+    "session_progress",
+    "gap_percent",
+    "distance_from_open",
+    "distance_from_previous_close"
+  ],
+  "class_labels": [
+    "BUY",
+    "SELL",
+    "HOLD"
+  ]
+}

@@ -38,6 +38,9 @@ class FeatureEngineer:
     BB_PERIOD = 20
     BB_STD_MULTIPLIER = 2.0
     VOLUME_ROLLING_PERIOD = 20
+    SESSION_OPEN_MINUTE = (9 * 60) + 15
+    SESSION_CLOSE_MINUTE = (15 * 60) + 30
+    SESSION_DURATION_MINUTES = SESSION_CLOSE_MINUTE - SESSION_OPEN_MINUTE
     MIN_ROWS_FOR_FULL_FEATURES = 200
     FINAL_FEATURE_COLUMNS: tuple[str, ...] = (
         "ema20",
@@ -57,6 +60,12 @@ class FeatureEngineer:
         "higher_high",
         "lower_low",
         "rolling_volume_avg",
+        "minute_of_day",
+        "minutes_since_open",
+        "session_progress",
+        "gap_percent",
+        "distance_from_open",
+        "distance_from_previous_close",
     )
 
     def prepare_base_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -170,8 +179,14 @@ class FeatureEngineer:
             adjust=False,
         ).mean()
 
-        rolling_mean = clean_df["close"].rolling(window=self.BB_PERIOD, min_periods=self.BB_PERIOD).mean()
-        rolling_std = clean_df["close"].rolling(window=self.BB_PERIOD, min_periods=self.BB_PERIOD).std(ddof=0)
+        rolling_mean = clean_df["close"].rolling(
+            window=self.BB_PERIOD,
+            min_periods=self.BB_PERIOD,
+        ).mean()
+        rolling_std = clean_df["close"].rolling(
+            window=self.BB_PERIOD,
+            min_periods=self.BB_PERIOD,
+        ).std(ddof=0)
         upper_band = rolling_mean + (self.BB_STD_MULTIPLIER * rolling_std)
         lower_band = rolling_mean - (self.BB_STD_MULTIPLIER * rolling_std)
 
@@ -223,6 +238,58 @@ class FeatureEngineer:
         clean_df["lower_low"] = clean_df["lower_low"].astype("bool")
         return clean_df
 
+    def add_time_context_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add intraday time context + opening gap behavior features."""
+        clean_df = self.prepare_base_dataframe(df)
+        clean_df = self._coerce_numeric_ohlcv(clean_df)
+        timestamps = pd.to_datetime(clean_df["timestamp"], errors="coerce")
+        if timestamps.isna().any():
+            raise FeatureEngineeringError(
+                "Unparseable timestamps found while building time features"
+            )
+
+        minute_of_day = (timestamps.dt.hour * 60) + timestamps.dt.minute
+        clean_df["minute_of_day"] = minute_of_day.astype("float64")
+        clean_df["minutes_since_open"] = (
+            (minute_of_day - self.SESSION_OPEN_MINUTE).clip(lower=0)
+        ).astype("float64")
+        session_progress = clean_df["minutes_since_open"] / float(self.SESSION_DURATION_MINUTES)
+        clean_df["session_progress"] = session_progress.clip(lower=0.0, upper=1.0).astype("float64")
+
+        session_date = timestamps.dt.date
+        day_open = clean_df.groupby(session_date, sort=False)["open"].transform("first")
+        day_close = clean_df.groupby(session_date, sort=False)["close"].last()
+        previous_day_close = session_date.map(day_close.shift(1))
+
+        clean_df["distance_from_open"] = (clean_df["close"] - day_open).astype("float64")
+        clean_df["distance_from_previous_close"] = (
+            clean_df["close"] - previous_day_close
+        ).astype("float64")
+        gap_percent = ((day_open - previous_day_close) / previous_day_close) * 100.0
+        clean_df["gap_percent"] = gap_percent.astype("float64")
+
+        time_cols = [
+            "gap_percent",
+            "distance_from_open",
+            "distance_from_previous_close",
+        ]
+        clean_df[time_cols] = clean_df[time_cols].fillna(0.0)
+
+        inf_mask = clean_df[
+            [
+                "minute_of_day",
+                "minutes_since_open",
+                "session_progress",
+                "gap_percent",
+                "distance_from_open",
+                "distance_from_previous_close",
+            ]
+        ].isin([float("inf"), float("-inf")])
+        if inf_mask.any().any():
+            raise FeatureEngineeringError("Infinite values detected in time/context features")
+
+        return clean_df
+
     def remove_initial_nan_rows(self, df: pd.DataFrame) -> pd.DataFrame:
         """Drop warmup rows containing NaN after indicator computation."""
         clean_df = self.prepare_base_dataframe(df)
@@ -250,9 +317,12 @@ class FeatureEngineer:
         clean_df = self.add_momentum_features(clean_df)
         clean_df = self.add_volatility_features(clean_df)
         clean_df = self.add_structure_features(clean_df)
+        clean_df = self.add_time_context_features(clean_df)
         clean_df = self.remove_initial_nan_rows(clean_df)
 
-        missing_features = [col for col in self.FINAL_FEATURE_COLUMNS if col not in clean_df.columns]
+        missing_features = [
+            col for col in self.FINAL_FEATURE_COLUMNS if col not in clean_df.columns
+        ]
         if missing_features:
             msg = f"Missing required engineered features: {', '.join(missing_features)}"
             logger.error("[FEATURE_ERROR] %s", msg)
@@ -281,7 +351,10 @@ class FeatureEngineer:
             logger.error("[FEATURE_ERROR] %s", msg)
             raise FeatureEngineeringError(msg)
 
-        if str(clean_df["higher_high"].dtype) != "bool" or str(clean_df["lower_low"].dtype) != "bool":
+        if (
+            str(clean_df["higher_high"].dtype) != "bool"
+            or str(clean_df["lower_low"].dtype) != "bool"
+        ):
             msg = "Feature flag columns must be bool dtype"
             logger.error("[FEATURE_ERROR] %s", msg)
             raise FeatureEngineeringError(msg)
@@ -300,5 +373,7 @@ class FeatureEngineer:
             logger.error("[FEATURE_ERROR] %s", msg)
             raise FeatureEngineeringError(msg)
 
-        clean_df[list(self.NUMERIC_COLUMNS)] = clean_df[list(self.NUMERIC_COLUMNS)].astype("float64")
+        clean_df[list(self.NUMERIC_COLUMNS)] = clean_df[list(self.NUMERIC_COLUMNS)].astype(
+            "float64"
+        )
         return clean_df

@@ -51,6 +51,10 @@ class Backtester:
         strategy_columns = getattr(self.strategy, "required_columns", ())
         return self.BASE_REQUIRED_COLUMNS + tuple(strategy_columns)
 
+    def _non_numeric_columns(self) -> set[str]:
+        non_numeric = getattr(self.strategy, "non_numeric_columns", ())
+        return {str(col) for col in non_numeric}
+
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         required_columns = self._required_columns()
         missing = [col for col in required_columns if col not in df.columns]
@@ -66,7 +70,8 @@ class Backtester:
         if clean["timestamp"].duplicated().any():
             raise BacktestError("Backtest dataframe contains duplicate timestamps")
 
-        numeric_cols = [c for c in required_columns if c != "timestamp"]
+        non_numeric = self._non_numeric_columns()
+        numeric_cols = [c for c in required_columns if c != "timestamp" and c not in non_numeric]
         for col in numeric_cols:
             clean[col] = pd.to_numeric(clean[col], errors="coerce")
 

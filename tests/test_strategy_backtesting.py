@@ -4,6 +4,7 @@ import pandas as pd
 
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    MLSignalStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     StrategyContext,
@@ -219,3 +220,46 @@ def test_one_minute_icici_strategy_respects_session_filter() -> None:
         }
     )
     assert strategy.generate_signal(out_of_session_row, context) == "HOLD"
+
+
+def test_ml_signal_strategy_maps_prediction_column() -> None:
+    strategy = MLSignalStrategy()
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    in_pos_context = StrategyContext(
+        in_position=True,
+        available_capital=95_000.0,
+        is_end_of_day=False,
+        position_side="LONG",
+    )
+
+    assert strategy.generate_signal(pd.Series({"prediction": "BUY"}), flat_context) == "BUY"
+    assert strategy.generate_signal(pd.Series({"prediction": "SELL"}), flat_context) == "HOLD"
+    assert strategy.generate_signal(pd.Series({"prediction": "SELL"}), in_pos_context) == "SELL"
+
+
+def test_ml_signal_strategy_blocks_entries_outside_entry_window() -> None:
+    strategy = MLSignalStrategy()
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    in_pos_context = StrategyContext(
+        in_position=True,
+        available_capital=95_000.0,
+        is_end_of_day=False,
+        position_side="LONG",
+    )
+    out_of_window_buy = pd.Series(
+        {"timestamp": pd.Timestamp("2026-01-01T11:00:00+05:30"), "prediction": "BUY"}
+    )
+    out_of_window_sell = pd.Series(
+        {"timestamp": pd.Timestamp("2026-01-01T11:00:00+05:30"), "prediction": "SELL"}
+    )
+
+    assert strategy.generate_signal(out_of_window_buy, flat_context) == "HOLD"
+    assert strategy.generate_signal(out_of_window_sell, in_pos_context) == "SELL"
