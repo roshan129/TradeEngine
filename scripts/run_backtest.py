@@ -15,6 +15,7 @@ from tradeengine.core.strategy import (
     Strategy,
     VwapRsiMeanReversionStrategy,
 )
+from tradeengine.ml.models.predictor import ModelPredictor
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +52,24 @@ def parse_args() -> argparse.Namespace:
         ],
         default="ema_rsi",
         help="Strategy to run (default: ema_rsi)",
+    )
+    parser.add_argument("--model", default="", help="Optional model artifact for ml_signal")
+    parser.add_argument(
+        "--predictions-output",
+        default="",
+        help="Optional CSV path to write predictions with probabilities",
+    )
+    parser.add_argument(
+        "--buy-threshold-proba",
+        type=float,
+        default=0.0,
+        help="Minimum BUY probability for BUY signal (default: 0.0 = disabled)",
+    )
+    parser.add_argument(
+        "--sell-threshold-proba",
+        type=float,
+        default=0.0,
+        help="Minimum SELL probability for SELL signal (default: 0.0 = disabled)",
     )
     parser.add_argument(
         "--allow-shorts",
@@ -114,10 +133,65 @@ def _parse_hhmm(value: str) -> time:
         raise ValueError(f"Invalid HH:MM time value: {value}") from exc
 
 
+def _apply_threshold_gating(
+    raw_predictions: pd.Series,
+    probabilities: pd.DataFrame,
+    buy_threshold: float,
+    sell_threshold: float,
+) -> pd.Series:
+    if buy_threshold <= 0.0 and sell_threshold <= 0.0:
+        return raw_predictions
+
+    buy_proba = probabilities["buy_probability"]
+    sell_proba = probabilities["sell_probability"]
+
+    gated = pd.Series("HOLD", index=raw_predictions.index, name="prediction", dtype="object")
+    buy_mask = buy_proba >= buy_threshold
+    sell_mask = sell_proba >= sell_threshold
+
+    gated.loc[buy_mask] = "BUY"
+    gated.loc[sell_mask] = "SELL"
+
+    conflict_mask = buy_mask & sell_mask
+    if conflict_mask.any():
+        gated.loc[conflict_mask] = "HOLD"
+        gated.loc[conflict_mask & (buy_proba > sell_proba)] = "BUY"
+        gated.loc[conflict_mask & (sell_proba > buy_proba)] = "SELL"
+    return gated
+
+
 def main() -> int:
     args = parse_args()
+    for threshold_name, threshold_value in (
+        ("buy-threshold-proba", args.buy_threshold_proba),
+        ("sell-threshold-proba", args.sell_threshold_proba),
+    ):
+        if not 0.0 <= threshold_value <= 1.0:
+            raise ValueError(f"{threshold_name} must be in [0, 1], got {threshold_value}")
 
     df = pd.read_csv(args.input)
+    if args.model and args.strategy != "ml_signal":
+        raise ValueError("--model is only supported with --strategy ml_signal")
+
+    if args.model:
+        predictor = ModelPredictor(model_path=args.model)
+        raw_predictions = predictor.predict(df)
+        probabilities = predictor.predict_proba(df)
+        predictions = _apply_threshold_gating(
+            raw_predictions=raw_predictions,
+            probabilities=probabilities,
+            buy_threshold=args.buy_threshold_proba,
+            sell_threshold=args.sell_threshold_proba,
+        )
+        df = df.copy(deep=True)
+        df["raw_prediction"] = raw_predictions
+        df["prediction"] = predictions
+        for column in probabilities.columns:
+            df[column] = probabilities[column]
+        if args.predictions_output:
+            df.to_csv(args.predictions_output, index=False)
+            print(f"Predictions written to: {args.predictions_output}")
+
     timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
     from_ts = timestamps.min()
     to_ts = timestamps.max()

@@ -1,7 +1,7 @@
 {
-  "model_version": "v1",
-  "training_rows": 2516,
-  "test_rows": 630,
+  "model_version": "oos_tuned",
+  "training_rows": 2315,
+  "test_rows": 4625,
   "training_date": "2026-03-11",
   "features": [
     "ema20",

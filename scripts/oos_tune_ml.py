@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import time
 from itertools import product
 from pathlib import Path
 from time import strptime
@@ -55,6 +56,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--brokerage-pct", type=float, default=0.0003)
     parser.add_argument("--ml-entry-start", default="09:20")
     parser.add_argument("--ml-entry-end", default="10:20")
+    parser.add_argument("--train-session-start", default="09:20")
+    parser.add_argument("--train-session-end", default="10:20")
     return parser.parse_args()
 
 
@@ -65,6 +68,40 @@ def parse_float_grid(value: str) -> list[float]:
 def parse_hhmm(value: str) -> tuple[int, int]:
     hour_text, minute_text = value.split(":", 1)
     return int(hour_text), int(minute_text)
+
+
+def _parse_hhmm_time(value: str) -> time:
+    hour_text, minute_text = value.split(":", 1)
+    return time(hour=int(hour_text), minute=int(minute_text))
+
+
+def _filter_by_session(
+    df: pd.DataFrame,
+    start: time,
+    end: time,
+    *,
+    label: str,
+) -> pd.DataFrame:
+    if "timestamp" not in df.columns:
+        print(f"[WARN] No timestamp column; skipping {label} session filter.")
+        return df
+
+    timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    if timestamps.isna().any():
+        raise ValueError(f"{label} data has invalid timestamps; cannot apply session filter.")
+
+    times = timestamps.dt.time
+    if start <= end:
+        mask = (times >= start) & (times <= end)
+    else:
+        mask = (times >= start) | (times <= end)
+
+    filtered = df.loc[mask].copy()
+    print(
+        f"[INFO] {label} session filter {start.strftime('%H:%M')}-{end.strftime('%H:%M')}: "
+        f"{len(df)} -> {len(filtered)} rows"
+    )
+    return filtered
 
 
 def apply_threshold_gating(
@@ -130,6 +167,15 @@ def main() -> int:
     test_features = features[features["timestamp"] > split_ts].reset_index(drop=True)
     if train_features.empty or test_features.empty:
         raise ValueError("Train/test split is empty. Adjust test-months.")
+
+    session_start = _parse_hhmm_time(args.train_session_start)
+    session_end = _parse_hhmm_time(args.train_session_end)
+    train_features = _filter_by_session(
+        train_features,
+        session_start,
+        session_end,
+        label="Training features",
+    )
 
     horizons = tuple(int(v.strip()) for v in args.horizons.split(",") if v.strip())
     builder = DatasetBuilder()
