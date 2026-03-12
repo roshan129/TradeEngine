@@ -60,6 +60,19 @@ def _filter_by_session(
     return filtered
 
 
+def _infer_candle_interval_minutes(df: pd.DataFrame) -> float | None:
+    if "timestamp" not in df.columns:
+        return None
+    timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
+    if timestamps.isna().any():
+        return None
+    deltas = timestamps.diff().dropna()
+    if deltas.empty:
+        return None
+    median_delta = deltas.median()
+    return float(median_delta.total_seconds() / 60.0)
+
+
 def main() -> int:
     args = parse_args()
 
@@ -67,6 +80,9 @@ def main() -> int:
     session_start = _parse_hhmm(args.train_session_start)
     session_end = _parse_hhmm(args.train_session_end)
     df = _filter_by_session(df, session_start, session_end, label="Training dataset")
+    dataset_range_start = df["timestamp"].min() if "timestamp" in df.columns else None
+    dataset_range_end = df["timestamp"].max() if "timestamp" in df.columns else None
+    candle_interval_minutes = _infer_candle_interval_minutes(df)
     available_features = [col for col in ML_FEATURE_COLUMNS if col in df.columns]
     missing_features = [col for col in ML_FEATURE_COLUMNS if col not in df.columns]
     if missing_features and not args.allow_missing_features:
@@ -95,6 +111,14 @@ def main() -> int:
             "model_version": args.model_version,
             "training_rows": int(len(x_train)),
             "test_rows": int(len(x_test)),
+            "dataset_path": args.dataset,
+            "dataset_range_start": str(dataset_range_start) if dataset_range_start is not None else None,
+            "dataset_range_end": str(dataset_range_end) if dataset_range_end is not None else None,
+            "candle_interval_minutes": candle_interval_minutes,
+            "train_session_start": args.train_session_start,
+            "train_session_end": args.train_session_end,
+            "feature_count": len(available_features),
+            "missing_features": missing_features,
         },
     )
 

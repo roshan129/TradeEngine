@@ -5,6 +5,7 @@ import pandas as pd
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
     MLSignalStrategy,
+    OpeningRangeBreakoutStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     StrategyContext,
@@ -263,3 +264,99 @@ def test_ml_signal_strategy_blocks_entries_outside_entry_window() -> None:
 
     assert strategy.generate_signal(out_of_window_buy, flat_context) == "HOLD"
     assert strategy.generate_signal(out_of_window_sell, in_pos_context) == "SELL"
+
+
+def test_opening_range_breakout_requires_opening_window_complete() -> None:
+    strategy = OpeningRangeBreakoutStrategy(probability_threshold=0.65)
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+
+    opening_915 = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-02T09:15:00+05:30"),
+            "high": 100.0,
+            "low": 99.0,
+        }
+    )
+    opening_920 = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-02T09:20:00+05:30"),
+            "high": 101.0,
+            "low": 98.5,
+        }
+    )
+    breakout = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-02T09:21:00+05:30"),
+            "high": 101.5,
+            "low": 100.5,
+            "buy_probability": 0.7,
+            "sell_probability": 0.1,
+        }
+    )
+
+    assert strategy.generate_signal(opening_915, flat_context) == "HOLD"
+    assert strategy.generate_signal(opening_920, flat_context) == "HOLD"
+    assert strategy.generate_signal(breakout, flat_context) == "BUY"
+
+
+def test_opening_range_breakout_respects_probability_threshold_and_tp() -> None:
+    strategy = OpeningRangeBreakoutStrategy(probability_threshold=0.65)
+    blocked_breakout = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-03T09:21:00+05:30"),
+            "high": 101.2,
+            "low": 100.0,
+            "buy_probability": 0.6,
+            "sell_probability": 0.1,
+        }
+    )
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+
+    # Seed opening range for the day.
+    strategy.generate_signal(
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-03T09:15:00+05:30"),
+                "high": 100.0,
+                "low": 99.0,
+            }
+        ),
+        flat_context,
+    )
+    strategy.generate_signal(
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-03T09:20:00+05:30"),
+                "high": 100.5,
+                "low": 98.8,
+            }
+        ),
+        flat_context,
+    )
+
+    assert strategy.generate_signal(blocked_breakout, flat_context) == "HOLD"
+
+    in_pos_context = StrategyContext(
+        in_position=True,
+        available_capital=90_000.0,
+        is_end_of_day=False,
+        position_side="LONG",
+        position_entry_price=100.0,
+        position_stop_loss=99.75,
+    )
+    tp_row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-03T09:30:00+05:30"),
+            "high": 100.3,
+            "low": 99.9,
+        }
+    )
+    assert strategy.generate_signal(tp_row, in_pos_context) == "SELL"

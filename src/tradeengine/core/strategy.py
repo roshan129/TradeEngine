@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
 from typing import Literal, Protocol
 
@@ -238,6 +238,195 @@ class MLSignalStrategy:
             return close - (atr * stop_atr_multiple)
         if signal == "SHORT":
             return close + (atr * stop_atr_multiple)
+        return None
+
+
+@dataclass
+class OpeningRangeBreakoutStrategy:
+    """Opening range breakout with optional ML probability filter."""
+
+    opening_start: time = time(hour=9, minute=15)
+    opening_end: time = time(hour=9, minute=20)
+    stop_loss_pct: float = 0.0025
+    take_profit_pct: float = 0.0025
+    probability_threshold: float = 0.65
+    allow_shorts: bool = True
+    reverse_signals: bool = False
+    use_trend_filter: bool = False
+    use_volatility_filter: bool = False
+    min_atr_pct: float = 0.001
+    min_bb_width: float = 0.004
+    buy_probability_column: str = "buy_probability"
+    sell_probability_column: str = "sell_probability"
+    _current_day: object | None = field(default=None, init=False, repr=False)
+    _opening_high: float | None = field(default=None, init=False, repr=False)
+    _opening_low: float | None = field(default=None, init=False, repr=False)
+    _opening_complete: bool = field(default=False, init=False, repr=False)
+
+    @property
+    def required_columns(self) -> tuple[str, ...]:
+        columns: list[str] = []
+        if self.probability_threshold and self.probability_threshold > 0:
+            columns.extend([self.buy_probability_column, self.sell_probability_column])
+        if self.use_volatility_filter:
+            columns.extend(["atr", "bb_width", "close"])
+        if self.use_trend_filter:
+            columns.extend(["ema20", "ema50", "ema200"])
+        return tuple(dict.fromkeys(columns))
+
+    def _reset_day(self, day: object) -> None:
+        self._current_day = day
+        self._opening_high = None
+        self._opening_low = None
+        self._opening_complete = False
+
+    def _update_opening_range(self, row: pd.Series, candle_time: time) -> None:
+        if self.opening_start <= candle_time <= self.opening_end:
+            high = float(row.get("high", float("nan")))
+            low = float(row.get("low", float("nan")))
+            if pd.isna(high) or pd.isna(low):
+                return
+            if self._opening_high is None or high > self._opening_high:
+                self._opening_high = high
+            if self._opening_low is None or low < self._opening_low:
+                self._opening_low = low
+
+        if candle_time > self.opening_end:
+            self._opening_complete = True
+
+    def _probability_ok(self, row: pd.Series, side: Signal) -> bool:
+        if not self.probability_threshold or self.probability_threshold <= 0:
+            return True
+        column = (
+            self.buy_probability_column if side == "BUY" else self.sell_probability_column
+        )
+        proba = float(row.get(column, float("nan")))
+        if pd.isna(proba):
+            return False
+        return proba >= self.probability_threshold
+
+    def _resolve_conflict(self, row: pd.Series) -> Signal:
+        if not self.probability_threshold or self.probability_threshold <= 0:
+            return "HOLD"
+        buy_proba = float(row.get(self.buy_probability_column, float("nan")))
+        sell_proba = float(row.get(self.sell_probability_column, float("nan")))
+        if pd.isna(buy_proba) or pd.isna(sell_proba):
+            return "HOLD"
+        if buy_proba > sell_proba:
+            return "BUY"
+        if sell_proba > buy_proba:
+            return "SHORT"
+        return "HOLD"
+
+    def _volatility_ok(self, row: pd.Series) -> bool:
+        if not self.use_volatility_filter:
+            return True
+        close = float(row.get("close", float("nan")))
+        atr = float(row.get("atr", float("nan")))
+        bb_width = float(row.get("bb_width", float("nan")))
+        if pd.isna(close) or pd.isna(atr) or pd.isna(bb_width) or close <= 0:
+            return False
+        atr_pct = atr / close
+        return atr_pct >= self.min_atr_pct and bb_width >= self.min_bb_width
+
+    def _trend_ok(self, row: pd.Series, side: Signal) -> bool:
+        if not self.use_trend_filter:
+            return True
+        ema20 = float(row.get("ema20", float("nan")))
+        ema50 = float(row.get("ema50", float("nan")))
+        ema200 = float(row.get("ema200", float("nan")))
+        if pd.isna(ema20) or pd.isna(ema50) or pd.isna(ema200):
+            return False
+        if side == "BUY":
+            return ema20 > ema50 > ema200
+        if side == "SELL":
+            return ema20 < ema50 < ema200
+        return False
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        ts = row.get("timestamp")
+        if ts is None:
+            return "HOLD"
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return "HOLD"
+
+        candle_day = timestamp.date()
+        candle_time = timestamp.time()
+        if candle_day != self._current_day:
+            self._reset_day(candle_day)
+
+        self._update_opening_range(row, candle_time)
+
+        if context.in_position:
+            if context.position_side is None:
+                return "HOLD"
+            if context.is_end_of_day:
+                return "SELL" if context.position_side == "LONG" else "COVER"
+            if context.position_entry_price is None:
+                return "HOLD"
+
+            entry_price = context.position_entry_price
+            high = float(row.get("high", float("nan")))
+            low = float(row.get("low", float("nan")))
+            if pd.isna(high) or pd.isna(low):
+                return "HOLD"
+
+            if context.position_side == "LONG":
+                target = entry_price * (1.0 + self.take_profit_pct)
+                return "SELL" if high >= target else "HOLD"
+
+            target = entry_price * (1.0 - self.take_profit_pct)
+            return "COVER" if low <= target else "HOLD"
+
+        if not self._opening_complete:
+            return "HOLD"
+        if self._opening_high is None or self._opening_low is None:
+            return "HOLD"
+
+        high = float(row.get("high", float("nan")))
+        low = float(row.get("low", float("nan")))
+        if pd.isna(high) or pd.isna(low):
+            return "HOLD"
+
+        if not self._volatility_ok(row):
+            return "HOLD"
+
+        long_trigger = high >= self._opening_high
+        short_trigger = low <= self._opening_low
+
+        signal: Signal = "HOLD"
+        if long_trigger and self._probability_ok(row, "BUY") and self._trend_ok(row, "BUY"):
+            signal = "BUY"
+        if (
+            short_trigger
+            and self.allow_shorts
+            and self._probability_ok(row, "SELL")
+            and self._trend_ok(row, "SELL")
+        ):
+            signal = "SHORT" if signal == "HOLD" else self._resolve_conflict(row)
+        if long_trigger and short_trigger and signal == "HOLD":
+            signal = self._resolve_conflict(row)
+
+        if self.reverse_signals:
+            return reverse_signal(signal)
+        return signal
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        del stop_atr_multiple
+        close = float(row.get("close", float("nan")))
+        if pd.isna(close) or close <= 0:
+            return None
+
+        if signal == "BUY":
+            return close * (1.0 - self.stop_loss_pct)
+        if signal == "SHORT":
+            return close * (1.0 + self.stop_loss_pct)
         return None
 
 

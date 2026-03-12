@@ -10,6 +10,7 @@ from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
     MLSignalStrategy,
+    OpeningRangeBreakoutStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     Strategy,
@@ -47,6 +48,7 @@ def parse_args() -> argparse.Namespace:
             "ema_rsi",
             "vwap_rsi_reversion",
             "ml_signal",
+            "opening_range_breakout",
             "one_minute_vwap_ema9_scalp",
             "one_minute_vwap_ema9_icici",
         ],
@@ -92,6 +94,56 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Limit number of new entries per day (0 means unlimited)",
+    )
+    parser.add_argument(
+        "--opening-start",
+        default="09:15",
+        help="Opening range start for opening_range_breakout in HH:MM (default: 09:15)",
+    )
+    parser.add_argument(
+        "--opening-end",
+        default="09:20",
+        help="Opening range end for opening_range_breakout in HH:MM (default: 09:20)",
+    )
+    parser.add_argument(
+        "--orb-sl-pct",
+        type=float,
+        default=0.0025,
+        help="Stop-loss percent for opening_range_breakout (default: 0.0025)",
+    )
+    parser.add_argument(
+        "--orb-tp-pct",
+        type=float,
+        default=0.0025,
+        help="Take-profit percent for opening_range_breakout (default: 0.0025)",
+    )
+    parser.add_argument(
+        "--orb-prob-threshold",
+        type=float,
+        default=0.65,
+        help="Minimum ML probability for opening_range_breakout entries (default: 0.65)",
+    )
+    parser.add_argument(
+        "--orb-use-trend-filter",
+        action="store_true",
+        help="Enable EMA trend filter for opening_range_breakout entries",
+    )
+    parser.add_argument(
+        "--orb-use-volatility-filter",
+        action="store_true",
+        help="Enable ATR/BB-width volatility filter for opening_range_breakout entries",
+    )
+    parser.add_argument(
+        "--orb-min-atr-pct",
+        type=float,
+        default=0.001,
+        help="Minimum ATR/close for opening_range_breakout when volatility filter enabled",
+    )
+    parser.add_argument(
+        "--orb-min-bb-width",
+        type=float,
+        default=0.004,
+        help="Minimum BB width for opening_range_breakout when volatility filter enabled",
     )
     parser.add_argument(
         "--icici-volume-multiplier",
@@ -165,13 +217,14 @@ def main() -> int:
     for threshold_name, threshold_value in (
         ("buy-threshold-proba", args.buy_threshold_proba),
         ("sell-threshold-proba", args.sell_threshold_proba),
+        ("orb-prob-threshold", args.orb_prob_threshold),
     ):
         if not 0.0 <= threshold_value <= 1.0:
             raise ValueError(f"{threshold_name} must be in [0, 1], got {threshold_value}")
 
     df = pd.read_csv(args.input)
-    if args.model and args.strategy != "ml_signal":
-        raise ValueError("--model is only supported with --strategy ml_signal")
+    if args.model and args.strategy not in {"ml_signal", "opening_range_breakout"}:
+        raise ValueError("--model is only supported with --strategy ml_signal or opening_range_breakout")
 
     if args.model:
         predictor = ModelPredictor(model_path=args.model)
@@ -195,7 +248,11 @@ def main() -> int:
     timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
     from_ts = timestamps.min()
     to_ts = timestamps.max()
-    short_enabled = args.allow_shorts or args.reverse_signals
+    short_enabled = (
+        True
+        if args.strategy == "opening_range_breakout"
+        else args.allow_shorts or args.reverse_signals
+    )
     strategy: Strategy
     if args.strategy == "vwap_rsi_reversion":
         strategy = VwapRsiMeanReversionStrategy(
@@ -208,6 +265,20 @@ def main() -> int:
             reverse_signals=args.reverse_signals,
             entry_session_start=_parse_hhmm(args.ml_entry_start),
             entry_session_end=_parse_hhmm(args.ml_entry_end),
+        )
+    elif args.strategy == "opening_range_breakout":
+        strategy = OpeningRangeBreakoutStrategy(
+            opening_start=_parse_hhmm(args.opening_start),
+            opening_end=_parse_hhmm(args.opening_end),
+            stop_loss_pct=args.orb_sl_pct,
+            take_profit_pct=args.orb_tp_pct,
+            probability_threshold=args.orb_prob_threshold,
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+            use_trend_filter=args.orb_use_trend_filter,
+            use_volatility_filter=args.orb_use_volatility_filter,
+            min_atr_pct=args.orb_min_atr_pct,
+            min_bb_width=args.orb_min_bb_width,
         )
     elif args.strategy == "one_minute_vwap_ema9_scalp":
         strategy = OneMinuteVwapEma9ScalpStrategy(
@@ -230,6 +301,9 @@ def main() -> int:
             reverse_signals=args.reverse_signals,
         )
 
+    max_entries = args.max_entries_per_day if args.max_entries_per_day > 0 else None
+    if args.strategy == "opening_range_breakout" and max_entries is None:
+        max_entries = 3
     config = BacktestConfig(
         initial_capital=args.initial_capital,
         risk_per_trade=args.risk_per_trade,
@@ -238,7 +312,7 @@ def main() -> int:
         brokerage_fixed=args.brokerage_fixed,
         brokerage_pct=args.brokerage_pct,
         allow_shorts=short_enabled,
-        max_entries_per_day=(args.max_entries_per_day if args.max_entries_per_day > 0 else None),
+        max_entries_per_day=max_entries,
     )
 
     backtester = Backtester(strategy=strategy, config=config)
