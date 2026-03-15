@@ -76,6 +76,20 @@ PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
   --max-entries-per-day 3
 ```
 
+```bash
+# Run Inside Bar Breakout on 1-minute data with volume + VWAP filters.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_1m_output.csv \
+  --strategy inside_bar_breakout \
+  --inside-entry-start 09:20 \
+  --inside-entry-end 10:20 \
+  --inside-max-setup-candles 5 \
+  --inside-min-range-pct 0.0015 \
+  --inside-use-volume-filter \
+  --inside-use-vwap-filter \
+  --max-entries-per-day 5
+```
+
 **walk_forward_orb_ml.py**
 ```bash
 # Monthly walk-forward: train ML each fold, then backtest ORB on next month(s).

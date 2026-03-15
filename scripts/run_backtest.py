@@ -9,6 +9,7 @@ import pandas as pd
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    InsideBarBreakoutStrategy,
     MLSignalStrategy,
     OpeningRangeBreakoutStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
@@ -49,6 +50,7 @@ def parse_args() -> argparse.Namespace:
             "vwap_rsi_reversion",
             "ml_signal",
             "opening_range_breakout",
+            "inside_bar_breakout",
             "one_minute_vwap_ema9_scalp",
             "one_minute_vwap_ema9_icici",
         ],
@@ -146,6 +148,71 @@ def parse_args() -> argparse.Namespace:
         help="Minimum BB width for opening_range_breakout when volatility filter enabled",
     )
     parser.add_argument(
+        "--inside-entry-start",
+        default="09:20",
+        help="Entry window start for inside_bar_breakout in HH:MM (default: 09:20)",
+    )
+    parser.add_argument(
+        "--inside-entry-end",
+        default="10:20",
+        help="Entry window end for inside_bar_breakout in HH:MM (default: 10:20)",
+    )
+    parser.add_argument(
+        "--inside-max-setup-candles",
+        type=int,
+        default=5,
+        help="Max candles to wait for breakout after inside bar (default: 5)",
+    )
+    parser.add_argument(
+        "--inside-min-range-pct",
+        type=float,
+        default=0.0015,
+        help="Minimum mother bar range as pct of close (default: 0.0015 = 0.15%)",
+    )
+    parser.add_argument(
+        "--inside-use-volume-filter",
+        action="store_true",
+        help="Require breakout candle volume > rolling volume average",
+    )
+    parser.add_argument(
+        "--inside-use-vwap-filter",
+        action="store_true",
+        help="Require price above VWAP for longs, below VWAP for shorts",
+    )
+    parser.add_argument(
+        "--inside-use-ema-filter",
+        action="store_true",
+        help="Require EMA20>EMA50>EMA200 for longs, reversed for shorts",
+    )
+    parser.add_argument(
+        "--inside-use-atr-stop",
+        action="store_true",
+        help="Use ATR-based stop-loss instead of mother-bar stop",
+    )
+    parser.add_argument(
+        "--inside-atr-stop-multiple",
+        type=float,
+        default=1.0,
+        help="ATR multiple for stop-loss when --inside-use-atr-stop is set",
+    )
+    parser.add_argument(
+        "--inside-rr-multiple",
+        type=float,
+        default=1.0,
+        help="Risk-reward multiple for inside_bar_breakout (default: 1.0)",
+    )
+    parser.add_argument(
+        "--inside-use-inside-range",
+        action="store_true",
+        help="Use inside-bar high/low for breakout and stop instead of mother bar",
+    )
+    parser.add_argument(
+        "--inside-prob-threshold",
+        type=float,
+        default=0.0,
+        help="Minimum ML probability for inside_bar_breakout entries (default: 0 disables)",
+    )
+    parser.add_argument(
         "--icici-volume-multiplier",
         type=float,
         default=1.8,
@@ -218,13 +285,14 @@ def main() -> int:
         ("buy-threshold-proba", args.buy_threshold_proba),
         ("sell-threshold-proba", args.sell_threshold_proba),
         ("orb-prob-threshold", args.orb_prob_threshold),
+        ("inside-prob-threshold", args.inside_prob_threshold),
     ):
         if not 0.0 <= threshold_value <= 1.0:
             raise ValueError(f"{threshold_name} must be in [0, 1], got {threshold_value}")
 
     df = pd.read_csv(args.input)
-    if args.model and args.strategy not in {"ml_signal", "opening_range_breakout"}:
-        raise ValueError("--model is only supported with --strategy ml_signal or opening_range_breakout")
+    if args.model and args.strategy not in {"ml_signal", "opening_range_breakout", "inside_bar_breakout"}:
+        raise ValueError("--model is only supported with --strategy ml_signal, opening_range_breakout, or inside_bar_breakout")
 
     if args.model:
         predictor = ModelPredictor(model_path=args.model)
@@ -279,6 +347,23 @@ def main() -> int:
             use_volatility_filter=args.orb_use_volatility_filter,
             min_atr_pct=args.orb_min_atr_pct,
             min_bb_width=args.orb_min_bb_width,
+        )
+    elif args.strategy == "inside_bar_breakout":
+        strategy = InsideBarBreakoutStrategy(
+            entry_session_start=_parse_hhmm(args.inside_entry_start),
+            entry_session_end=_parse_hhmm(args.inside_entry_end),
+            max_setup_candles=max(1, args.inside_max_setup_candles),
+            min_mother_range_pct=args.inside_min_range_pct,
+            use_volume_filter=args.inside_use_volume_filter,
+            use_vwap_trend_filter=args.inside_use_vwap_filter,
+            use_ema_trend_filter=args.inside_use_ema_filter,
+            use_atr_stop=args.inside_use_atr_stop,
+            atr_stop_multiple=args.inside_atr_stop_multiple,
+            risk_reward_multiple=args.inside_rr_multiple,
+            use_inside_bar_range=args.inside_use_inside_range,
+            probability_threshold=args.inside_prob_threshold,
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
         )
     elif args.strategy == "one_minute_vwap_ema9_scalp":
         strategy = OneMinuteVwapEma9ScalpStrategy(

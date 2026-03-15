@@ -31,3 +31,7 @@ htmlcov/
 
 # Data exports and reports
 *.csv
+
+# Model artifacts
+*.pkl
+*_metadata.json
