@@ -6,6 +6,8 @@ import pytest
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    FirstFiveMinuteFakeBreakoutStrategy,
+    FirstFiveMinuteCandleMomentumStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     RandomOpenDirectionStrategy,
@@ -375,3 +377,92 @@ def test_backtester_runs_random_open_direction_strategy() -> None:
     trade = result.trades.iloc[0]
     assert trade["side"] == "LONG"
     assert trade["exit_reason"] == "STRATEGY_EXIT_LONG"
+
+
+def test_backtester_runs_first_five_minute_momentum_strategy() -> None:
+    timestamps = [
+        pd.Timestamp("2026-01-06T09:15:00+05:30"),
+        pd.Timestamp("2026-01-06T09:16:00+05:30"),
+        pd.Timestamp("2026-01-06T09:17:00+05:30"),
+        pd.Timestamp("2026-01-06T09:18:00+05:30"),
+        pd.Timestamp("2026-01-06T09:19:00+05:30"),
+        pd.Timestamp("2026-01-06T09:20:00+05:30"),
+        pd.Timestamp("2026-01-06T09:21:00+05:30"),
+    ]
+    df = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": [100.0, 100.3, 100.5, 100.7, 100.9, 101.1, 101.4],
+            "high": [100.4, 100.6, 100.8, 101.0, 101.2, 101.3, 102.7],
+            "low": [99.9, 100.2, 100.4, 100.6, 100.8, 101.0, 101.3],
+            "close": [100.3, 100.5, 100.7, 100.9, 101.1, 101.25, 102.4],
+            "volume": [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1500.0, 1500.0],
+            "rolling_volume_avg": [900.0, 900.0, 900.0, 900.0, 900.0, 900.0, 900.0],
+            "vwap": [100.0, 100.1, 100.2, 100.4, 100.6, 100.8, 101.2],
+            "atr": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+            "gap_percent": [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4],
+        }
+    )
+    cfg = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+        max_entries_per_day=1,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(
+        strategy=FirstFiveMinuteCandleMomentumStrategy(use_gap_filter=False),
+        config=cfg,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "LONG"
+    assert trade["exit_reason"] == "STRATEGY_EXIT_LONG"
+
+
+def test_backtester_runs_first_five_minute_fake_breakout_strategy() -> None:
+    timestamps = [
+        pd.Timestamp("2026-01-07T09:15:00+05:30"),
+        pd.Timestamp("2026-01-07T09:16:00+05:30"),
+        pd.Timestamp("2026-01-07T09:17:00+05:30"),
+        pd.Timestamp("2026-01-07T09:18:00+05:30"),
+        pd.Timestamp("2026-01-07T09:19:00+05:30"),
+        pd.Timestamp("2026-01-07T09:22:00+05:30"),
+        pd.Timestamp("2026-01-07T09:24:00+05:30"),
+        pd.Timestamp("2026-01-07T09:26:00+05:30"),
+    ]
+    df = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": [100.0, 100.3, 100.5, 100.7, 100.9, 101.15, 101.25, 100.9],
+            "high": [100.4, 100.6, 100.8, 101.0, 101.2, 101.5, 101.3, 100.95],
+            "low": [99.9, 100.2, 100.4, 100.6, 100.8, 101.1, 100.9, 100.0],
+            "close": [100.3, 100.5, 100.7, 100.9, 101.1, 101.4, 101.0, 100.1],
+            "volume": [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 1200.0, 1400.0, 1500.0],
+            "rolling_volume_avg": [900.0, 900.0, 900.0, 900.0, 900.0, 900.0, 900.0, 900.0],
+            "vwap": [100.0, 100.1, 100.2, 100.4, 100.6, 101.0, 101.2, 100.7],
+        }
+    )
+    cfg = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+        max_entries_per_day=1,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(
+        strategy=FirstFiveMinuteFakeBreakoutStrategy(),
+        config=cfg,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "SHORT"
+    assert trade["exit_reason"] == "STRATEGY_EXIT_SHORT"

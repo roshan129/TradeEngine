@@ -113,6 +113,47 @@ PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
 ```
 
 ```bash
+# Run the first 5-minute candle momentum breakout strategy on 1-minute data.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_36m_1m_sbin.csv \
+  --strategy first_five_minute_momentum \
+  --allow-shorts \
+  --first-candle-rr-multiple 1.0
+```
+
+```bash
+# Run the first 5-minute fake-breakout strategy on 1-minute data.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_36m_1m_sbin.csv \
+  --strategy first_five_minute_fake_breakout \
+  --allow-shorts \
+  --fake-breakout-rr-multiple 1.0
+```
+
+```bash
+# Compare the current least-bad SBI first-candle breakout setup:
+# fixed 0.25% stop, fixed 0.25% target, small-gap days only, breakout by 09:30.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_36m_1m_sbin.csv \
+  --strategy first_five_minute_momentum \
+  --allow-shorts \
+  --first-candle-stop-loss-pct 0.0025 \
+  --first-candle-take-profit-pct 0.0025 \
+  --first-candle-max-gap-percent 0.5 \
+  --first-candle-breakout-end 09:30
+```
+
+```bash
+# Compare first-candle breakout vs fake-breakout with fixed stop/target.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_36m_1m_sbin.csv \
+  --strategy first_five_minute_fake_breakout \
+  --allow-shorts \
+  --fake-breakout-stop-loss-pct 0.0025 \
+  --fake-breakout-take-profit-pct 0.005
+```
+
+```bash
 # Run multi-timeframe Support/Resistance Reversal:
 # 5-minute candles build structure levels, 1-minute candles execute trades.
 PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \

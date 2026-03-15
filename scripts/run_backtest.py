@@ -10,6 +10,8 @@ import pandas as pd
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    FirstFiveMinuteFakeBreakoutStrategy,
+    FirstFiveMinuteCandleMomentumStrategy,
     InsideBarBreakoutStrategy,
     MLSignalStrategy,
     OpeningRangeBreakoutStrategy,
@@ -58,6 +60,8 @@ def parse_args() -> argparse.Namespace:
             "vwap_rsi_reversion",
             "ml_signal",
             "opening_range_breakout",
+            "first_five_minute_momentum",
+            "first_five_minute_fake_breakout",
             "inside_bar_breakout",
             "random_open_direction",
             "support_resistance_reversal",
@@ -156,6 +160,110 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.004,
         help="Minimum BB width for opening_range_breakout when volatility filter enabled",
+    )
+    parser.add_argument(
+        "--first-candle-breakout-start",
+        default="09:20",
+        help="Breakout monitoring start for first_five_minute_momentum in HH:MM (default: 09:20)",
+    )
+    parser.add_argument(
+        "--first-candle-breakout-end",
+        default="10:00",
+        help="Breakout monitoring end for first_five_minute_momentum in HH:MM (default: 10:00)",
+    )
+    parser.add_argument(
+        "--first-candle-min-body-percent",
+        type=float,
+        default=0.5,
+        help="Minimum body/range ratio for first_five_minute_momentum (default: 0.5)",
+    )
+    parser.add_argument(
+        "--first-candle-rr-multiple",
+        type=float,
+        default=1.0,
+        help="Risk-reward multiple for first_five_minute_momentum (default: 1.0)",
+    )
+    parser.add_argument(
+        "--first-candle-min-range-atr-multiple",
+        type=float,
+        default=0.8,
+        help="Minimum first-candle range as ATR multiple for first_five_minute_momentum (default: 0.8)",
+    )
+    parser.add_argument(
+        "--first-candle-max-gap-percent",
+        type=float,
+        default=1.5,
+        help="Maximum allowed gap percent for first_five_minute_momentum (default: 1.5)",
+    )
+    parser.add_argument(
+        "--first-candle-disable-volume-filter",
+        action="store_true",
+        help="Disable breakout volume filter for first_five_minute_momentum",
+    )
+    parser.add_argument(
+        "--first-candle-disable-vwap-filter",
+        action="store_true",
+        help="Disable VWAP filter for first_five_minute_momentum",
+    )
+    parser.add_argument(
+        "--first-candle-disable-atr-filter",
+        action="store_true",
+        help="Disable ATR filter for first_five_minute_momentum",
+    )
+    parser.add_argument(
+        "--first-candle-disable-gap-filter",
+        action="store_true",
+        help="Disable gap filter for first_five_minute_momentum",
+    )
+    parser.add_argument(
+        "--first-candle-stop-loss-pct",
+        type=float,
+        default=0.0,
+        help="Fixed stop-loss percent from entry for first_five_minute_momentum (default: 0.0 = disabled)",
+    )
+    parser.add_argument(
+        "--first-candle-take-profit-pct",
+        type=float,
+        default=0.0,
+        help="Fixed take-profit percent from entry for first_five_minute_momentum (default: 0.0 = disabled)",
+    )
+    parser.add_argument(
+        "--fake-breakout-failure-deadline",
+        default="09:40",
+        help="Latest time to observe the initial trap breakout for first_five_minute_fake_breakout (default: 09:40)",
+    )
+    parser.add_argument(
+        "--fake-breakout-trade-deadline",
+        default="10:00",
+        help="Final time to enter/hold first_five_minute_fake_breakout trades (default: 10:00)",
+    )
+    parser.add_argument(
+        "--fake-breakout-rr-multiple",
+        type=float,
+        default=1.0,
+        help="Risk-reward multiple for first_five_minute_fake_breakout (default: 1.0)",
+    )
+    parser.add_argument(
+        "--fake-breakout-disable-volume-filter",
+        action="store_true",
+        help="Disable volume filter for first_five_minute_fake_breakout",
+    )
+    parser.add_argument(
+        "--fake-breakout-disable-vwap-filter",
+        action="store_true",
+        help="Disable VWAP filter for first_five_minute_fake_breakout",
+    )
+    parser.add_argument(
+        "--fake-breakout-stop-loss-pct",
+        type=float,
+        default=0.0,
+        help="Fixed stop-loss percent from entry for first_five_minute_fake_breakout (default: 0.0 = disabled)",
+    )
+    parser.add_argument(
+        "--fake-breakout-take-profit-pct",
+        type=float,
+        default=0.0,
+        help="Fixed take-profit percent from entry for first_five_minute_fake_breakout (default: 0.0 = disabled)",
     )
     parser.add_argument(
         "--inside-entry-start",
@@ -631,6 +739,47 @@ def main() -> int:
             min_atr_pct=args.orb_min_atr_pct,
             min_bb_width=args.orb_min_bb_width,
         )
+    elif args.strategy == "first_five_minute_momentum":
+        strategy = FirstFiveMinuteCandleMomentumStrategy(
+            breakout_start=_parse_hhmm(args.first_candle_breakout_start),
+            breakout_end=_parse_hhmm(args.first_candle_breakout_end),
+            min_body_percent=args.first_candle_min_body_percent,
+            risk_reward_multiple=args.first_candle_rr_multiple,
+            fixed_stop_loss_pct=(
+                args.first_candle_stop_loss_pct if args.first_candle_stop_loss_pct > 0 else None
+            ),
+            fixed_take_profit_pct=(
+                args.first_candle_take_profit_pct
+                if args.first_candle_take_profit_pct > 0
+                else None
+            ),
+            min_range_atr_multiple=args.first_candle_min_range_atr_multiple,
+            max_gap_percent=args.first_candle_max_gap_percent,
+            use_volume_filter=not args.first_candle_disable_volume_filter,
+            use_vwap_filter=not args.first_candle_disable_vwap_filter,
+            use_atr_filter=not args.first_candle_disable_atr_filter,
+            use_gap_filter=not args.first_candle_disable_gap_filter,
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
+    elif args.strategy == "first_five_minute_fake_breakout":
+        strategy = FirstFiveMinuteFakeBreakoutStrategy(
+            failure_deadline=_parse_hhmm(args.fake_breakout_failure_deadline),
+            trade_deadline=_parse_hhmm(args.fake_breakout_trade_deadline),
+            risk_reward_multiple=args.fake_breakout_rr_multiple,
+            fixed_stop_loss_pct=(
+                args.fake_breakout_stop_loss_pct if args.fake_breakout_stop_loss_pct > 0 else None
+            ),
+            fixed_take_profit_pct=(
+                args.fake_breakout_take_profit_pct
+                if args.fake_breakout_take_profit_pct > 0
+                else None
+            ),
+            use_volume_filter=not args.fake_breakout_disable_volume_filter,
+            use_vwap_filter=not args.fake_breakout_disable_vwap_filter,
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
     elif args.strategy == "inside_bar_breakout":
         strategy = InsideBarBreakoutStrategy(
             entry_session_start=_parse_hhmm(args.inside_entry_start),
@@ -700,6 +849,10 @@ def main() -> int:
     max_entries = args.max_entries_per_day if args.max_entries_per_day > 0 else None
     if args.strategy == "opening_range_breakout" and max_entries is None:
         max_entries = 3
+    if args.strategy == "first_five_minute_momentum" and max_entries is None:
+        max_entries = 1
+    if args.strategy == "first_five_minute_fake_breakout" and max_entries is None:
+        max_entries = 1
     if args.strategy == "support_resistance_reversal" and max_entries is None:
         max_entries = 10
     config = BacktestConfig(

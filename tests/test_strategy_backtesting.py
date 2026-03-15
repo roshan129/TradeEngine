@@ -5,6 +5,8 @@ import pytest
 
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
+    FirstFiveMinuteCandleMomentumStrategy,
+    FirstFiveMinuteFakeBreakoutStrategy,
     MLSignalStrategy,
     OpeningRangeBreakoutStrategy,
     RandomOpenDirectionStrategy,
@@ -484,3 +486,263 @@ def test_random_open_direction_uses_candle_extreme_as_stop() -> None:
         assert stop == 99.0
     else:
         assert stop == 101.0
+
+
+def test_first_five_minute_momentum_triggers_bullish_breakout() -> None:
+    strategy = FirstFiveMinuteCandleMomentumStrategy(
+        allow_shorts=True,
+        use_gap_filter=False,
+    )
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    opening_rows = [
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-06T09:15:00+05:30"),
+                "open": 100.0,
+                "high": 100.4,
+                "low": 99.9,
+                "close": 100.3,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.0,
+                "atr": 0.5,
+                "gap_percent": 0.4,
+            }
+        ),
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-06T09:16:00+05:30"),
+                "open": 100.3,
+                "high": 100.6,
+                "low": 100.2,
+                "close": 100.5,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.1,
+                "atr": 0.5,
+                "gap_percent": 0.4,
+            }
+        ),
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-06T09:17:00+05:30"),
+                "open": 100.5,
+                "high": 100.8,
+                "low": 100.4,
+                "close": 100.7,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.2,
+                "atr": 0.5,
+                "gap_percent": 0.4,
+            }
+        ),
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-06T09:18:00+05:30"),
+                "open": 100.7,
+                "high": 101.0,
+                "low": 100.6,
+                "close": 100.9,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.4,
+                "atr": 0.5,
+                "gap_percent": 0.4,
+            }
+        ),
+        pd.Series(
+            {
+                "timestamp": pd.Timestamp("2026-01-06T09:19:00+05:30"),
+                "open": 100.9,
+                "high": 101.2,
+                "low": 100.8,
+                "close": 101.1,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.6,
+                "atr": 0.5,
+                "gap_percent": 0.4,
+            }
+        ),
+    ]
+    for row in opening_rows:
+        assert strategy.generate_signal(row, flat_context) == "HOLD"
+
+    breakout_row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-06T09:20:00+05:30"),
+            "open": 101.1,
+            "high": 101.3,
+            "low": 101.0,
+            "close": 101.25,
+            "volume": 1500.0,
+            "rolling_volume_avg": 900.0,
+            "vwap": 100.8,
+            "atr": 0.5,
+            "gap_percent": 0.4,
+        }
+    )
+
+    assert strategy.generate_signal(breakout_row, flat_context) == "BUY"
+    assert strategy.entry_stop_loss(
+        row=breakout_row, signal="BUY", stop_atr_multiple=1.0
+    ) == pytest.approx(99.9)
+
+
+def test_first_five_minute_momentum_reverse_sets_short_stop_correctly() -> None:
+    strategy = FirstFiveMinuteCandleMomentumStrategy(
+        allow_shorts=True,
+        reverse_signals=True,
+        use_gap_filter=False,
+    )
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    for minute, high, low, close in [
+        (15, 100.4, 99.9, 100.3),
+        (16, 100.6, 100.2, 100.5),
+        (17, 100.8, 100.4, 100.7),
+        (18, 101.0, 100.6, 100.9),
+        (19, 101.2, 100.8, 101.1),
+    ]:
+        row = pd.Series(
+            {
+                "timestamp": pd.Timestamp(f"2026-01-06T09:{minute}:00+05:30"),
+                "open": 100.0,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.0,
+                "atr": 0.5,
+                "gap_percent": 0.4,
+            }
+        )
+        strategy.generate_signal(row, flat_context)
+
+    breakout_row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-06T09:20:00+05:30"),
+            "open": 101.1,
+            "high": 101.3,
+            "low": 101.0,
+            "close": 101.25,
+            "volume": 1500.0,
+            "rolling_volume_avg": 900.0,
+            "vwap": 100.8,
+            "atr": 0.5,
+            "gap_percent": 0.4,
+        }
+    )
+
+    assert strategy.generate_signal(breakout_row, flat_context) == "SHORT"
+    assert strategy.entry_stop_loss(
+        row=breakout_row, signal="SHORT", stop_atr_multiple=1.0
+    ) == pytest.approx(101.2)
+
+
+def test_first_five_minute_fake_breakout_triggers_short_after_failed_up_break() -> None:
+    strategy = FirstFiveMinuteFakeBreakoutStrategy(allow_shorts=True)
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    for minute, high, low in [
+        (15, 100.4, 99.9),
+        (16, 100.6, 100.2),
+        (17, 100.8, 100.4),
+        (18, 101.0, 100.6),
+        (19, 101.2, 100.8),
+    ]:
+        row = pd.Series(
+            {
+                "timestamp": pd.Timestamp(f"2026-01-07T09:{minute}:00+05:30"),
+                "open": 100.0,
+                "high": high,
+                "low": low,
+                "close": high - 0.1,
+                "volume": 1000.0,
+                "rolling_volume_avg": 900.0,
+                "vwap": 100.0,
+            }
+        )
+        assert strategy.generate_signal(row, flat_context) == "HOLD"
+
+    breakout_row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-07T09:22:00+05:30"),
+            "open": 101.15,
+            "high": 101.5,
+            "low": 101.1,
+            "close": 101.4,
+            "volume": 1200.0,
+            "rolling_volume_avg": 900.0,
+            "vwap": 101.0,
+        }
+    )
+    assert strategy.generate_signal(breakout_row, flat_context) == "HOLD"
+
+    failure_row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-07T09:24:00+05:30"),
+            "open": 101.25,
+            "high": 101.3,
+            "low": 100.9,
+            "close": 101.0,
+            "volume": 1400.0,
+            "rolling_volume_avg": 900.0,
+            "vwap": 101.2,
+        }
+    )
+    assert strategy.generate_signal(failure_row, flat_context) == "SHORT"
+    assert strategy.entry_stop_loss(
+        row=failure_row, signal="SHORT", stop_atr_multiple=1.0
+    ) == pytest.approx(101.5)
+
+
+def test_first_five_minute_momentum_uses_fixed_percent_stop_loss() -> None:
+    strategy = FirstFiveMinuteCandleMomentumStrategy(
+        fixed_stop_loss_pct=0.0025,
+        use_gap_filter=False,
+    )
+    row = pd.Series({"close": 100.0})
+
+    assert strategy.entry_stop_loss(row=row, signal="BUY", stop_atr_multiple=1.0) == pytest.approx(
+        99.75
+    )
+
+
+def test_first_five_minute_fake_breakout_uses_fixed_percent_take_profit() -> None:
+    strategy = FirstFiveMinuteFakeBreakoutStrategy(
+        fixed_take_profit_pct=0.005,
+    )
+    context = StrategyContext(
+        in_position=True,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+        position_side="LONG",
+        position_entry_price=100.0,
+        position_stop_loss=99.0,
+    )
+    row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-07T09:30:00+05:30"),
+            "high": 100.6,
+            "low": 100.1,
+            "close": 100.4,
+            "volume": 1500.0,
+            "rolling_volume_avg": 900.0,
+            "vwap": 100.2,
+        }
+    )
+
+    assert strategy.generate_signal(row, context) == "SELL"

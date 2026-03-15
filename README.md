@@ -17,6 +17,8 @@ Live order execution and DB persistence are still out of scope.
 - Multiple strategies:
   - `ema_rsi` (trend + momentum baseline)
   - `vwap_rsi_reversion` (mean reversion baseline)
+  - `first_five_minute_momentum` (first 5-minute candle breakout using 1-minute execution)
+  - `first_five_minute_fake_breakout` (fade failed breakouts of the first 5-minute candle)
   - `random_open_direction` (deterministic random long/short entry on a chosen intraday candle)
   - `one_minute_vwap_ema9_scalp` (VWAP+EMA9 pullback scalp with volume confirmation)
   - `support_resistance_reversal` (intraday swing-based support/resistance reversals)
@@ -286,6 +288,18 @@ Random open-direction strategy commands:
 - 5-minute random long/short at `09:15` with `1:1` RR:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_5m_sbin.csv --strategy random_open_direction --allow-shorts --random-entry-time 09:15 --random-rr-multiple 1.0 --random-seed 42`
 
+First 5-minute candle momentum strategy commands:
+- Breakout of the `09:15-09:20` candle on 1-minute data with `1:1` RR:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-rr-multiple 1.0`
+- Breakout of the `09:15-09:20` candle with fixed `0.25%` stop and `0.25%` target:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-stop-loss-pct 0.0025 --first-candle-take-profit-pct 0.0025`
+
+First 5-minute fake breakout strategy commands:
+- Fade failed first-candle breakouts on 1-minute data with `1:1` RR:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_fake_breakout --allow-shorts --fake-breakout-rr-multiple 1.0`
+- Fade failed first-candle breakouts with fixed `0.25%` stop and `0.5%` target:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_fake_breakout --allow-shorts --fake-breakout-stop-loss-pct 0.0025 --fake-breakout-take-profit-pct 0.005`
+
 One-minute VWAP+EMA9 scalp strategy commands:
 - Long-only:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp`
@@ -309,6 +323,26 @@ Support/resistance reversal strategy:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy support_resistance_reversal --allow-shorts`
 - Multi-timeframe: detect structure on 5-minute data, execute on 1-minute data:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_nifty50.csv --structure-input feature_history_36m_5m_nifty50.csv --strategy support_resistance_reversal --allow-shorts`
+
+## Recent Breakout Research
+
+SBI (`NSE_EQ|INE062A01020`) has been the primary single-stock research dataset for recent breakout testing.
+
+- `support_resistance_reversal` was not viable on SBI, even in reversed or MTF variants.
+- `first_five_minute_momentum` has been the strongest breakout-style baseline so far.
+- Reversing the first-candle breakout did not create an edge after stop-loss handling was fixed.
+- `first_five_minute_fake_breakout` underperformed the plain first-candle breakout on SBI.
+
+Current least-bad tested setup on SBI:
+- Strategy: `first_five_minute_momentum`
+- Dataset: `feature_history_36m_1m_sbin.csv`
+- Gap filter: `abs(gap_percent) <= 0.5`
+- Breakout window: `09:20-09:30`
+- Fixed stop loss: `0.25%`
+- Fixed take profit: `0.25%`
+
+Reference command:
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-stop-loss-pct 0.0025 --first-candle-take-profit-pct 0.0025 --first-candle-max-gap-percent 0.5 --first-candle-breakout-end 09:30`
 
 ML-driven strategy (uses `prediction` column):
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts`
