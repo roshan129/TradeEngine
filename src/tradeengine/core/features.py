@@ -122,7 +122,13 @@ class FeatureEngineer:
         typical_price = (clean_df["high"] + clean_df["low"] + clean_df["close"]) / 3.0
         tpv = typical_price * clean_df["volume"]
         cumulative_volume = clean_df["volume"].cumsum()
-        clean_df["vwap"] = tpv.cumsum() / cumulative_volume
+        vwap = tpv.cumsum() / cumulative_volume
+        zero_volume_mask = cumulative_volume == 0
+        if zero_volume_mask.any():
+            # Index data can report zero volume; fall back to typical price for VWAP.
+            vwap = vwap.copy()
+            vwap.loc[zero_volume_mask] = typical_price.loc[zero_volume_mask]
+        clean_df["vwap"] = vwap
         return clean_df
 
     def add_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:

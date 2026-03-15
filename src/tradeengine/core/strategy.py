@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import time
+import random
 from typing import Literal, Protocol
 
 import pandas as pd
@@ -688,6 +690,461 @@ class InsideBarBreakoutStrategy:
         if self._clear_after_entry:
             self._clear_setup()
         return stop
+
+
+@dataclass
+class SupportResistanceLevel:
+    level_type: Literal["support", "resistance"]
+    price: float
+    touch_count: int
+    created_index: int
+    last_touched_index: int
+    last_trade_index: int | None = None
+
+
+@dataclass
+class SupportResistanceReversalStrategy:
+    """Intraday support/resistance reversal strategy with swing-level detection."""
+
+    entry_session_start: time = time(hour=9, minute=20)
+    entry_session_end: time = time(hour=14, minute=30)
+    zone_tolerance_pct: float = 0.0005
+    distance_threshold_pct: float = 0.0008
+    stop_offset_pct: float = 0.001
+    risk_reward_multiple: float = 1.0
+    cooldown_candles: int = 10
+    level_expiry_candles: int = 120
+    min_touch_count: int = 2
+    volume_multiplier: float = 1.0
+    use_volume_filter: bool = True
+    use_vwap_filter: bool = True
+    use_trend_filter: bool = True
+    ema20_slope_threshold_pct: float = 0.001
+    use_external_levels: bool = False
+    allow_shorts: bool = True
+    reverse_signals: bool = False
+    _current_day: object | None = field(default=None, init=False, repr=False)
+    _bar_index: int = field(default=0, init=False, repr=False)
+    _levels: list[SupportResistanceLevel] = field(default_factory=list, init=False, repr=False)
+    _buffer: deque[dict[str, float]] = field(
+        default_factory=lambda: deque(maxlen=5), init=False, repr=False
+    )
+    _pending_entry_level_price: float | None = field(default=None, init=False, repr=False)
+    _pending_entry_signal: Signal | None = field(default=None, init=False, repr=False)
+    _prev_ema20: float | None = field(default=None, init=False, repr=False)
+    _external_level_last_trade: dict[tuple[str, float], int] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    @property
+    def required_columns(self) -> tuple[str, ...]:
+        columns = ["volume", "rolling_volume_avg", "vwap", "ema20"]
+        if self.use_external_levels:
+            columns.extend(
+                [
+                    "sr_support_price",
+                    "sr_support_touch_count",
+                    "sr_resistance_price",
+                    "sr_resistance_touch_count",
+                ]
+            )
+        return tuple(columns)
+
+    def _reset_day(self, day: object) -> None:
+        self._current_day = day
+        self._bar_index = 0
+        self._levels = []
+        self._buffer.clear()
+        self._pending_entry_level_price = None
+        self._pending_entry_signal = None
+        self._prev_ema20 = None
+        self._external_level_last_trade = {}
+
+    def _in_session(self, candle_time: time) -> bool:
+        return self.entry_session_start <= candle_time <= self.entry_session_end
+
+    def _update_swing_levels(self) -> None:
+        if len(self._buffer) < 5:
+            return
+        highs = [candle["high"] for candle in self._buffer]
+        lows = [candle["low"] for candle in self._buffer]
+
+        center_high = highs[2]
+        center_low = lows[2]
+        center_index = self._bar_index - 2
+
+        if center_high > highs[0] and center_high > highs[1] and center_high > highs[3] and center_high > highs[4]:
+            self._add_level("resistance", center_high, center_index)
+
+        if center_low < lows[0] and center_low < lows[1] and center_low < lows[3] and center_low < lows[4]:
+            self._add_level("support", center_low, center_index)
+
+    def _add_level(self, level_type: Literal["support", "resistance"], price: float, index: int) -> None:
+        if price <= 0:
+            return
+        for level in self._levels:
+            if level.level_type != level_type:
+                continue
+            if self._within_zone(price, level.price):
+                combined_touches = level.touch_count + 1
+                level.price = (level.price * level.touch_count + price) / combined_touches
+                level.touch_count = combined_touches
+                level.last_touched_index = index
+                return
+
+        self._levels.append(
+            SupportResistanceLevel(
+                level_type=level_type,
+                price=price,
+                touch_count=1,
+                created_index=index,
+                last_touched_index=index,
+            )
+        )
+
+    def _within_zone(self, price: float, level_price: float) -> bool:
+        if level_price <= 0:
+            return False
+        return abs(price - level_price) / level_price <= self.zone_tolerance_pct
+
+    def _update_level_touches(self, low: float, high: float) -> None:
+        for level in self._levels:
+            touch_price = low if level.level_type == "support" else high
+            if self._within_zone(touch_price, level.price):
+                if level.last_touched_index != self._bar_index:
+                    level.touch_count += 1
+                    level.last_touched_index = self._bar_index
+
+    def _expire_levels(self) -> None:
+        expiry = max(self.level_expiry_candles, 1)
+        self._levels = [
+            level
+            for level in self._levels
+            if (self._bar_index - level.last_touched_index) <= expiry
+        ]
+
+    def _volume_ok(self, volume: float, volume_avg: float) -> bool:
+        if not self.use_volume_filter:
+            return True
+        if volume_avg <= 0:
+            return False
+        return volume > (self.volume_multiplier * volume_avg)
+
+    def _trend_ok(self, ema20: float, close: float) -> bool:
+        if not self.use_trend_filter:
+            return True
+        if self._prev_ema20 is None or close <= 0:
+            return True
+        slope_pct = abs(ema20 - self._prev_ema20) / close
+        return slope_pct <= self.ema20_slope_threshold_pct
+
+    @staticmethod
+    def _bullish_rejection(open_price: float, close: float, low: float) -> bool:
+        body = abs(close - open_price)
+        lower_wick = min(open_price, close) - low
+        return close > open_price and lower_wick > body
+
+    @staticmethod
+    def _bearish_rejection(open_price: float, close: float, high: float) -> bool:
+        body = abs(close - open_price)
+        upper_wick = high - max(open_price, close)
+        return close < open_price and upper_wick > body
+
+    def _level_strength(self, level: SupportResistanceLevel) -> float:
+        age = max(self._bar_index - level.last_touched_index, 0)
+        expiry = max(self.level_expiry_candles, 1)
+        recency_bonus = max(0.0, (expiry - age) / expiry)
+        return (level.touch_count * 2.0) + recency_bonus
+
+    def _select_level(
+        self, level_type: Literal["support", "resistance"], touch_price: float
+    ) -> SupportResistanceLevel | None:
+        if touch_price <= 0:
+            return None
+        candidates: list[SupportResistanceLevel] = []
+        for level in self._levels:
+            if level.level_type != level_type:
+                continue
+            if level.touch_count < self.min_touch_count:
+                continue
+            if level.last_trade_index is not None:
+                if (self._bar_index - level.last_trade_index) <= self.cooldown_candles:
+                    continue
+            distance = abs(touch_price - level.price) / level.price
+            if distance <= self.distance_threshold_pct:
+                candidates.append(level)
+        if not candidates:
+            return None
+        return max(candidates, key=self._level_strength)
+
+    def _external_level_key(
+        self, level_type: Literal["support", "resistance"], price: float
+    ) -> tuple[str, float]:
+        return (level_type, round(price, 6))
+
+    def _select_external_level(
+        self, row: pd.Series, level_type: Literal["support", "resistance"], touch_price: float
+    ) -> SupportResistanceLevel | None:
+        price = float(row.get(f"sr_{level_type}_price", float("nan")))
+        touch_count = float(row.get(f"sr_{level_type}_touch_count", float("nan")))
+        if pd.isna(price) or pd.isna(touch_count) or price <= 0:
+            return None
+        if touch_count < self.min_touch_count:
+            return None
+        distance = abs(touch_price - price) / price
+        if distance > self.distance_threshold_pct:
+            return None
+        level_key = self._external_level_key(level_type, price)
+        last_trade_index = self._external_level_last_trade.get(level_key)
+        if last_trade_index is not None and (
+            self._bar_index - last_trade_index
+        ) <= self.cooldown_candles:
+            return None
+        return SupportResistanceLevel(
+            level_type=level_type,
+            price=price,
+            touch_count=int(touch_count),
+            created_index=self._bar_index,
+            last_touched_index=self._bar_index,
+        )
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        ts = row.get("timestamp")
+        if ts is None:
+            return "HOLD"
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return "HOLD"
+
+        candle_day = timestamp.date()
+        candle_time = timestamp.time()
+        if candle_day != self._current_day:
+            self._reset_day(candle_day)
+
+        open_price = float(row.get("open", float("nan")))
+        high = float(row.get("high", float("nan")))
+        low = float(row.get("low", float("nan")))
+        close = float(row.get("close", float("nan")))
+        volume = float(row.get("volume", float("nan")))
+        volume_avg = float(row.get("rolling_volume_avg", float("nan")))
+        vwap = float(row.get("vwap", float("nan")))
+        ema20 = float(row.get("ema20", float("nan")))
+        inputs = (open_price, high, low, close, volume, volume_avg, vwap, ema20)
+        if any(pd.isna(v) for v in inputs):
+            return "HOLD"
+
+        self._bar_index += 1
+        if not self.use_external_levels:
+            self._buffer.append({"high": high, "low": low})
+            self._update_swing_levels()
+            self._update_level_touches(low=low, high=high)
+            self._expire_levels()
+
+        signal: Signal = "HOLD"
+        if context.in_position:
+            if context.position_side is None:
+                signal = "HOLD"
+            elif context.is_end_of_day:
+                signal = "SELL" if context.position_side == "LONG" else "COVER"
+            elif context.position_entry_price is None or context.position_stop_loss is None:
+                signal = "HOLD"
+            else:
+                entry_price = context.position_entry_price
+                stop_loss = context.position_stop_loss
+                risk = abs(entry_price - stop_loss)
+                if risk <= 0:
+                    signal = "HOLD"
+                elif context.position_side == "LONG":
+                    target = entry_price + (risk * self.risk_reward_multiple)
+                    signal = "SELL" if high >= target else "HOLD"
+                else:
+                    target = entry_price - (risk * self.risk_reward_multiple)
+                    signal = "COVER" if low <= target else "HOLD"
+        else:
+            if not self._in_session(candle_time):
+                self._prev_ema20 = ema20
+                return "HOLD"
+
+            if not self._volume_ok(volume=volume, volume_avg=volume_avg):
+                self._prev_ema20 = ema20
+                return "HOLD"
+
+            if not self._trend_ok(ema20=ema20, close=close):
+                self._prev_ema20 = ema20
+                return "HOLD"
+
+            long_ok = (not self.use_vwap_filter) or (close > vwap)
+            short_ok = (not self.use_vwap_filter) or (close < vwap)
+
+            if self.use_external_levels:
+                support_level = self._select_external_level(
+                    row=row, level_type="support", touch_price=low
+                )
+                resistance_level = self._select_external_level(
+                    row=row, level_type="resistance", touch_price=high
+                )
+            else:
+                support_level = self._select_level("support", touch_price=low)
+                resistance_level = self._select_level("resistance", touch_price=high)
+
+            if support_level and long_ok and self._bullish_rejection(open_price, close, low):
+                signal = "BUY"
+                self._pending_entry_level_price = support_level.price
+                if self.use_external_levels:
+                    level_key = self._external_level_key("support", support_level.price)
+                    self._external_level_last_trade[level_key] = self._bar_index
+                else:
+                    support_level.last_trade_index = self._bar_index
+
+            if (
+                signal == "HOLD"
+                and resistance_level
+                and short_ok
+                and self.allow_shorts
+                and self._bearish_rejection(open_price, close, high)
+            ):
+                signal = "SHORT"
+                self._pending_entry_level_price = resistance_level.price
+                if self.use_external_levels:
+                    level_key = self._external_level_key("resistance", resistance_level.price)
+                    self._external_level_last_trade[level_key] = self._bar_index
+                else:
+                    resistance_level.last_trade_index = self._bar_index
+
+        self._prev_ema20 = ema20
+
+        if self.reverse_signals:
+            signal = reverse_signal(signal)
+
+        if signal in {"BUY", "SHORT"}:
+            self._pending_entry_signal = signal
+        else:
+            self._pending_entry_signal = None
+            if signal != "HOLD":
+                self._pending_entry_level_price = None
+
+        return signal
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        del stop_atr_multiple
+        level_price = self._pending_entry_level_price
+        pending_signal = self._pending_entry_signal
+        self._pending_entry_level_price = None
+        self._pending_entry_signal = None
+        if level_price is None or pending_signal is None:
+            return None
+
+        if pending_signal == "BUY":
+            return level_price * (1.0 - self.stop_offset_pct)
+        if pending_signal == "SHORT":
+            return level_price * (1.0 + self.stop_offset_pct)
+        return None
+
+
+@dataclass
+class RandomOpenDirectionStrategy:
+    """Enter a deterministic random long/short trade on a specific intraday candle."""
+
+    entry_time: time = time(hour=9, minute=15)
+    risk_reward_multiple: float = 1.0
+    seed: int = 42
+    allow_shorts: bool = True
+    reverse_signals: bool = False
+    _current_day: object | None = field(default=None, init=False, repr=False)
+    _day_has_traded: bool = field(default=False, init=False, repr=False)
+    _pending_entry_signal: Signal | None = field(default=None, init=False, repr=False)
+
+    required_columns: tuple[str, ...] = ()
+
+    def _reset_day(self, day: object) -> None:
+        self._current_day = day
+        self._day_has_traded = False
+        self._pending_entry_signal = None
+
+    def _pick_direction(self, candle_day: object) -> Signal:
+        day_seed = f"{self.seed}-{candle_day}"
+        chooser = random.Random(day_seed)
+        if self.allow_shorts:
+            signal = chooser.choice(["BUY", "SHORT"])
+        else:
+            signal = "BUY"
+        return reverse_signal(signal) if self.reverse_signals else signal
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        ts = row.get("timestamp")
+        if ts is None:
+            return "HOLD"
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return "HOLD"
+
+        candle_day = timestamp.date()
+        candle_time = timestamp.time()
+        if candle_day != self._current_day:
+            self._reset_day(candle_day)
+
+        if context.in_position:
+            if context.position_side is None:
+                return "HOLD"
+            if context.is_end_of_day:
+                return "SELL" if context.position_side == "LONG" else "COVER"
+            if context.position_entry_price is None or context.position_stop_loss is None:
+                return "HOLD"
+
+            entry_price = context.position_entry_price
+            stop_loss = context.position_stop_loss
+            risk = abs(entry_price - stop_loss)
+            if risk <= 0:
+                return "HOLD"
+
+            high = float(row.get("high", float("nan")))
+            low = float(row.get("low", float("nan")))
+            if pd.isna(high) or pd.isna(low):
+                return "HOLD"
+
+            if context.position_side == "LONG":
+                target = entry_price + (risk * self.risk_reward_multiple)
+                return "SELL" if high >= target else "HOLD"
+
+            target = entry_price - (risk * self.risk_reward_multiple)
+            return "COVER" if low <= target else "HOLD"
+
+        if self._day_has_traded or candle_time != self.entry_time:
+            return "HOLD"
+
+        signal = self._pick_direction(candle_day)
+        self._pending_entry_signal = signal
+        self._day_has_traded = True
+        return signal
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        del stop_atr_multiple
+        pending_signal = self._pending_entry_signal
+        self._pending_entry_signal = None
+        if pending_signal is None:
+            return None
+
+        low = float(row.get("low", float("nan")))
+        high = float(row.get("high", float("nan")))
+        close = float(row.get("close", float("nan")))
+        if pd.isna(low) or pd.isna(high) or pd.isna(close):
+            return None
+
+        if pending_signal == "BUY":
+            return low if low < close else None
+        if pending_signal == "SHORT":
+            return high if high > close else None
+        return None
 
 @dataclass(frozen=True)
 class OneMinuteVwapEma9ScalpStrategy:

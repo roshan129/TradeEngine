@@ -90,6 +90,40 @@ PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
   --max-entries-per-day 5
 ```
 
+```bash
+# Run Support/Resistance Reversal on 1-minute data with volume + VWAP filters.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_1m_output.csv \
+  --strategy support_resistance_reversal \
+  --sr-entry-start 09:20 \
+  --sr-entry-end 14:30 \
+  --sr-risk-reward 1.5 \
+  --max-entries-per-day 10
+```
+
+```bash
+# Run deterministic random long/short entries on the 09:15 5-minute candle with 1:1 RR.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_36m_5m_sbin.csv \
+  --strategy random_open_direction \
+  --allow-shorts \
+  --random-entry-time 09:15 \
+  --random-rr-multiple 1.0 \
+  --random-seed 42
+```
+
+```bash
+# Run multi-timeframe Support/Resistance Reversal:
+# 5-minute candles build structure levels, 1-minute candles execute trades.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_36m_1m_nifty50.csv \
+  --structure-input feature_history_36m_5m_nifty50.csv \
+  --strategy support_resistance_reversal \
+  --allow-shorts \
+  --sr-risk-reward 1.5 \
+  --max-entries-per-day 10
+```
+
 **walk_forward_orb_ml.py**
 ```bash
 # Monthly walk-forward: train ML each fold, then backtest ORB on next month(s).

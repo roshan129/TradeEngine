@@ -44,6 +44,12 @@ def _feature_df(rows: int = 5) -> pd.DataFrame:
             "higher_high": [True, False, True, False, True][:rows],
             "lower_low": [False, True, False, True, False][:rows],
             "rolling_volume_avg": 1000.0 + idx * 10.0,
+            "minute_of_day": 555.0 + idx,
+            "minutes_since_open": 0.0 + idx,
+            "session_progress": np.clip(idx / max(rows - 1, 1), 0.0, 1.0),
+            "gap_percent": 0.001 + idx * 0.0001,
+            "distance_from_open": 0.002 + idx * 0.0001,
+            "distance_from_previous_close": 0.0015 + idx * 0.0001,
         }
     )
 

@@ -8,6 +8,7 @@ from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
+    RandomOpenDirectionStrategy,
     VwapRsiMeanReversionStrategy,
 )
 
@@ -335,3 +336,42 @@ def test_backtester_honors_max_entries_per_day_limit() -> None:
         config=cfg,
     ).run(df)
     assert len(result.trades) <= 1
+
+
+def test_backtester_runs_random_open_direction_strategy() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-05T09:15:00+05:30"),
+                pd.Timestamp("2026-01-05T09:20:00+05:30"),
+                pd.Timestamp("2026-01-05T09:25:00+05:30"),
+            ],
+            "open": [100.0, 100.5, 101.5],
+            "high": [101.0, 102.5, 102.0],
+            "low": [99.0, 100.0, 100.5],
+            "close": [100.5, 102.0, 101.0],
+        }
+    )
+    cfg = BacktestConfig(
+        initial_capital=10_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=False,
+        max_entries_per_day=1,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(
+        strategy=RandomOpenDirectionStrategy(
+            allow_shorts=False,
+            risk_reward_multiple=1.0,
+            entry_time=pd.Timestamp("2026-01-05T09:15:00+05:30").time(),
+        ),
+        config=cfg,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "LONG"
+    assert trade["exit_reason"] == "STRATEGY_EXIT_LONG"

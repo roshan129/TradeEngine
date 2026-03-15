@@ -17,7 +17,10 @@ Live order execution and DB persistence are still out of scope.
 - Multiple strategies:
   - `ema_rsi` (trend + momentum baseline)
   - `vwap_rsi_reversion` (mean reversion baseline)
+  - `random_open_direction` (deterministic random long/short entry on a chosen intraday candle)
   - `one_minute_vwap_ema9_scalp` (VWAP+EMA9 pullback scalp with volume confirmation)
+  - `support_resistance_reversal` (intraday swing-based support/resistance reversals)
+  - supports multi-timeframe mode via 5-minute structure projected into 1-minute execution rows
 - Candle-by-candle event-driven backtest loop (no vectorized leakage)
 - Single-position portfolio model with dynamic ATR-based position sizing
 - Stop loss, strategy exits, and end-of-day exits
@@ -279,6 +282,10 @@ VWAP+RSI reversion strategy commands:
 - Reversed signals:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --reverse-signals`
 
+Random open-direction strategy commands:
+- 5-minute random long/short at `09:15` with `1:1` RR:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_5m_sbin.csv --strategy random_open_direction --allow-shorts --random-entry-time 09:15 --random-rr-multiple 1.0 --random-seed 42`
+
 One-minute VWAP+EMA9 scalp strategy commands:
 - Long-only:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp`
@@ -296,6 +303,12 @@ ICICI-focused one-minute strategy commands:
   - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --max-entries-per-day 6`
 - ATR take-profit mode:
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --scalp-tp-mode atr`
+
+Support/resistance reversal strategy:
+- Single-timeframe on the input CSV:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy support_resistance_reversal --allow-shorts`
+- Multi-timeframe: detect structure on 5-minute data, execute on 1-minute data:
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_nifty50.csv --structure-input feature_history_36m_5m_nifty50.csv --strategy support_resistance_reversal --allow-shorts`
 
 ML-driven strategy (uses `prediction` column):
 - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts`

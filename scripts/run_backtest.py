@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from datetime import time
 
 import pandas as pd
@@ -12,6 +13,8 @@ from tradeengine.core.strategy import (
     InsideBarBreakoutStrategy,
     MLSignalStrategy,
     OpeningRangeBreakoutStrategy,
+    RandomOpenDirectionStrategy,
+    SupportResistanceReversalStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     Strategy,
@@ -26,6 +29,11 @@ def parse_args() -> argparse.Namespace:
         "--input",
         required=True,
         help="Path to input CSV containing OHLC + indicator columns required by selected strategy",
+    )
+    parser.add_argument(
+        "--structure-input",
+        default="",
+        help="Optional higher-timeframe CSV used to project structure levels into --input",
     )
     parser.add_argument(
         "--trades-output",
@@ -51,6 +59,8 @@ def parse_args() -> argparse.Namespace:
             "ml_signal",
             "opening_range_breakout",
             "inside_bar_breakout",
+            "random_open_direction",
+            "support_resistance_reversal",
             "one_minute_vwap_ema9_scalp",
             "one_minute_vwap_ema9_icici",
         ],
@@ -213,6 +223,102 @@ def parse_args() -> argparse.Namespace:
         help="Minimum ML probability for inside_bar_breakout entries (default: 0 disables)",
     )
     parser.add_argument(
+        "--random-entry-time",
+        default="09:15",
+        help="Entry candle time for random_open_direction in HH:MM (default: 09:15)",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Deterministic seed for random_open_direction (default: 42)",
+    )
+    parser.add_argument(
+        "--random-rr-multiple",
+        type=float,
+        default=1.0,
+        help="Risk-reward multiple for random_open_direction (default: 1.0)",
+    )
+    parser.add_argument(
+        "--sr-entry-start",
+        default="09:20",
+        help="Entry window start for support_resistance_reversal in HH:MM (default: 09:20)",
+    )
+    parser.add_argument(
+        "--sr-entry-end",
+        default="14:30",
+        help="Entry window end for support_resistance_reversal in HH:MM (default: 14:30)",
+    )
+    parser.add_argument(
+        "--sr-zone-tolerance-pct",
+        type=float,
+        default=0.0005,
+        help="Level clustering tolerance for support_resistance_reversal (default: 0.0005)",
+    )
+    parser.add_argument(
+        "--sr-distance-threshold-pct",
+        type=float,
+        default=0.0008,
+        help="Max distance from level for support_resistance_reversal (default: 0.0008)",
+    )
+    parser.add_argument(
+        "--sr-stop-offset-pct",
+        type=float,
+        default=0.001,
+        help="Stop offset beyond level for support_resistance_reversal (default: 0.001)",
+    )
+    parser.add_argument(
+        "--sr-risk-reward",
+        type=float,
+        default=1.0,
+        help="Risk-reward multiple for support_resistance_reversal (default: 1.0)",
+    )
+    parser.add_argument(
+        "--sr-cooldown-candles",
+        type=int,
+        default=10,
+        help="Cooldown in candles per level for support_resistance_reversal (default: 10)",
+    )
+    parser.add_argument(
+        "--sr-level-expiry-candles",
+        type=int,
+        default=120,
+        help="Expiry in candles for support_resistance_reversal levels (default: 120)",
+    )
+    parser.add_argument(
+        "--sr-min-touch-count",
+        type=int,
+        default=2,
+        help="Minimum touches required for support_resistance_reversal levels (default: 2)",
+    )
+    parser.add_argument(
+        "--sr-volume-multiplier",
+        type=float,
+        default=1.0,
+        help="Volume multiplier vs rolling avg for support_resistance_reversal (default: 1.0)",
+    )
+    parser.add_argument(
+        "--sr-disable-volume-filter",
+        action="store_true",
+        help="Disable volume filter for support_resistance_reversal",
+    )
+    parser.add_argument(
+        "--sr-disable-vwap-filter",
+        action="store_true",
+        help="Disable VWAP trend filter for support_resistance_reversal",
+    )
+    parser.add_argument(
+        "--sr-disable-trend-filter",
+        action="store_true",
+        help="Disable EMA20 slope filter for support_resistance_reversal",
+    )
+    parser.add_argument(
+        "--sr-ema20-slope-threshold",
+        type=float,
+        default=0.001,
+        help="EMA20 slope threshold for support_resistance_reversal (default: 0.001)",
+    )
+    parser.add_argument(
         "--icici-volume-multiplier",
         type=float,
         default=1.8,
@@ -279,6 +385,171 @@ def _apply_threshold_gating(
     return gated
 
 
+def _within_zone(price: float, level_price: float, zone_tolerance_pct: float) -> bool:
+    if level_price <= 0:
+        return False
+    return abs(price - level_price) / level_price <= zone_tolerance_pct
+
+
+def _build_structure_snapshots(
+    structure_df: pd.DataFrame,
+    zone_tolerance_pct: float,
+    level_expiry_candles: int,
+    min_touch_count: int,
+) -> pd.DataFrame:
+    clean = structure_df.copy(deep=True)
+    clean["timestamp"] = pd.to_datetime(clean["timestamp"], errors="coerce")
+    clean = clean.sort_values("timestamp", ascending=True).reset_index(drop=True)
+
+    current_day: object | None = None
+    bar_index = 0
+    levels: list[dict[str, float | int | str]] = []
+    buffer: deque[dict[str, float]] = deque(maxlen=5)
+    rows: list[dict[str, object]] = []
+
+    def add_level(level_type: str, price: float, index: int) -> None:
+        if price <= 0:
+            return
+        for level in levels:
+            if level["level_type"] != level_type:
+                continue
+            if _within_zone(price, float(level["price"]), zone_tolerance_pct):
+                touch_count = int(level["touch_count"]) + 1
+                level["price"] = ((float(level["price"]) * int(level["touch_count"])) + price) / touch_count
+                level["touch_count"] = touch_count
+                level["last_touched_index"] = index
+                return
+        levels.append(
+            {
+                "level_type": level_type,
+                "price": price,
+                "touch_count": 1,
+                "last_touched_index": index,
+            }
+        )
+
+    def pick_level(level_type: str, close_price: float) -> tuple[float | None, int | None]:
+        candidates: list[dict[str, float | int | str]] = []
+        for level in levels:
+            if level["level_type"] != level_type:
+                continue
+            if int(level["touch_count"]) < min_touch_count:
+                continue
+            level_price = float(level["price"])
+            if level_type == "support" and level_price > close_price:
+                continue
+            if level_type == "resistance" and level_price < close_price:
+                continue
+            candidates.append(level)
+        if not candidates:
+            return None, None
+        candidates.sort(
+            key=lambda level: (
+                int(level["touch_count"]),
+                int(level["last_touched_index"]),
+                -abs(close_price - float(level["price"])),
+            ),
+            reverse=True,
+        )
+        best = candidates[0]
+        return float(best["price"]), int(best["touch_count"])
+
+    for _, row in clean.iterrows():
+        timestamp = pd.Timestamp(row["timestamp"])
+        if pd.isna(timestamp):
+            continue
+        candle_day = timestamp.date()
+        if candle_day != current_day:
+            current_day = candle_day
+            bar_index = 0
+            levels = []
+            buffer.clear()
+
+        bar_index += 1
+        high = float(row["high"])
+        low = float(row["low"])
+        close = float(row["close"])
+
+        buffer.append({"high": high, "low": low})
+        if len(buffer) == 5:
+            highs = [candle["high"] for candle in buffer]
+            lows = [candle["low"] for candle in buffer]
+            center_high = highs[2]
+            center_low = lows[2]
+            center_index = bar_index - 2
+            if center_high > highs[0] and center_high > highs[1] and center_high > highs[3] and center_high > highs[4]:
+                add_level("resistance", center_high, center_index)
+            if center_low < lows[0] and center_low < lows[1] and center_low < lows[3] and center_low < lows[4]:
+                add_level("support", center_low, center_index)
+
+        for level in levels:
+            touch_price = low if level["level_type"] == "support" else high
+            if _within_zone(touch_price, float(level["price"]), zone_tolerance_pct):
+                if int(level["last_touched_index"]) != bar_index:
+                    level["touch_count"] = int(level["touch_count"]) + 1
+                    level["last_touched_index"] = bar_index
+
+        levels = [
+            level
+            for level in levels
+            if (bar_index - int(level["last_touched_index"])) <= max(level_expiry_candles, 1)
+        ]
+
+        support_price, support_touch_count = pick_level("support", close)
+        resistance_price, resistance_touch_count = pick_level("resistance", close)
+        rows.append(
+            {
+                "timestamp": timestamp,
+                "sr_support_price": support_price,
+                "sr_support_touch_count": support_touch_count,
+                "sr_resistance_price": resistance_price,
+                "sr_resistance_touch_count": resistance_touch_count,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _enrich_execution_with_structure(
+    execution_df: pd.DataFrame,
+    structure_df: pd.DataFrame,
+    zone_tolerance_pct: float,
+    level_expiry_candles: int,
+    min_touch_count: int,
+) -> pd.DataFrame:
+    execution = execution_df.copy(deep=True)
+    execution["timestamp"] = pd.to_datetime(execution["timestamp"], errors="coerce")
+    execution = execution.sort_values("timestamp", ascending=True).reset_index(drop=True)
+
+    snapshots = _build_structure_snapshots(
+        structure_df=structure_df,
+        zone_tolerance_pct=zone_tolerance_pct,
+        level_expiry_candles=level_expiry_candles,
+        min_touch_count=min_touch_count,
+    )
+    snapshots = snapshots.rename(columns={"timestamp": "structure_timestamp"})
+
+    enriched = pd.merge_asof(
+        execution,
+        snapshots,
+        left_on="timestamp",
+        right_on="structure_timestamp",
+        direction="backward",
+    )
+    execution_day = enriched["timestamp"].dt.date
+    structure_day = pd.to_datetime(enriched["structure_timestamp"], errors="coerce").dt.date
+    structure_columns = [
+        "sr_support_price",
+        "sr_support_touch_count",
+        "sr_resistance_price",
+        "sr_resistance_touch_count",
+    ]
+    enriched.loc[execution_day != structure_day, structure_columns] = pd.NA
+    enriched = enriched.drop(columns=["structure_timestamp"])
+    enriched[structure_columns] = enriched[structure_columns].fillna(0.0)
+    return enriched
+
+
 def main() -> int:
     args = parse_args()
     for threshold_name, threshold_value in (
@@ -291,6 +562,8 @@ def main() -> int:
             raise ValueError(f"{threshold_name} must be in [0, 1], got {threshold_value}")
 
     df = pd.read_csv(args.input)
+    if args.structure_input and args.strategy != "support_resistance_reversal":
+        raise ValueError("--structure-input is currently only supported with --strategy support_resistance_reversal")
     if args.model and args.strategy not in {"ml_signal", "opening_range_breakout", "inside_bar_breakout"}:
         raise ValueError("--model is only supported with --strategy ml_signal, opening_range_breakout, or inside_bar_breakout")
 
@@ -312,6 +585,16 @@ def main() -> int:
         if args.predictions_output:
             df.to_csv(args.predictions_output, index=False)
             print(f"Predictions written to: {args.predictions_output}")
+
+    if args.structure_input:
+        structure_df = pd.read_csv(args.structure_input)
+        df = _enrich_execution_with_structure(
+            execution_df=df,
+            structure_df=structure_df,
+            zone_tolerance_pct=args.sr_zone_tolerance_pct,
+            level_expiry_candles=max(1, args.sr_level_expiry_candles),
+            min_touch_count=max(1, args.sr_min_touch_count),
+        )
 
     timestamps = pd.to_datetime(df["timestamp"], errors="coerce")
     from_ts = timestamps.min()
@@ -365,6 +648,34 @@ def main() -> int:
             allow_shorts=short_enabled,
             reverse_signals=args.reverse_signals,
         )
+    elif args.strategy == "random_open_direction":
+        strategy = RandomOpenDirectionStrategy(
+            entry_time=_parse_hhmm(args.random_entry_time),
+            risk_reward_multiple=args.random_rr_multiple,
+            seed=args.random_seed,
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
+    elif args.strategy == "support_resistance_reversal":
+        strategy = SupportResistanceReversalStrategy(
+            entry_session_start=_parse_hhmm(args.sr_entry_start),
+            entry_session_end=_parse_hhmm(args.sr_entry_end),
+            zone_tolerance_pct=args.sr_zone_tolerance_pct,
+            distance_threshold_pct=args.sr_distance_threshold_pct,
+            stop_offset_pct=args.sr_stop_offset_pct,
+            risk_reward_multiple=args.sr_risk_reward,
+            cooldown_candles=max(0, args.sr_cooldown_candles),
+            level_expiry_candles=max(1, args.sr_level_expiry_candles),
+            min_touch_count=max(1, args.sr_min_touch_count),
+            volume_multiplier=args.sr_volume_multiplier,
+            use_volume_filter=not args.sr_disable_volume_filter,
+            use_vwap_filter=not args.sr_disable_vwap_filter,
+            use_trend_filter=not args.sr_disable_trend_filter,
+            ema20_slope_threshold_pct=args.sr_ema20_slope_threshold,
+            use_external_levels=bool(args.structure_input),
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
     elif args.strategy == "one_minute_vwap_ema9_scalp":
         strategy = OneMinuteVwapEma9ScalpStrategy(
             allow_shorts=short_enabled,
@@ -389,6 +700,8 @@ def main() -> int:
     max_entries = args.max_entries_per_day if args.max_entries_per_day > 0 else None
     if args.strategy == "opening_range_breakout" and max_entries is None:
         max_entries = 3
+    if args.strategy == "support_resistance_reversal" and max_entries is None:
+        max_entries = 10
     config = BacktestConfig(
         initial_capital=args.initial_capital,
         risk_per_trade=args.risk_per_trade,

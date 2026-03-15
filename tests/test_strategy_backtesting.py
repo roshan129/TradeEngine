@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
     MLSignalStrategy,
     OpeningRangeBreakoutStrategy,
+    RandomOpenDirectionStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
+    SupportResistanceReversalStrategy,
     StrategyContext,
     VwapRsiMeanReversionStrategy,
 )
@@ -360,3 +363,124 @@ def test_opening_range_breakout_respects_probability_threshold_and_tp() -> None:
         }
     )
     assert strategy.generate_signal(tp_row, in_pos_context) == "SELL"
+
+
+def test_support_resistance_reversal_can_trade_external_support_level() -> None:
+    strategy = SupportResistanceReversalStrategy(
+        use_external_levels=True,
+        allow_shorts=True,
+        use_trend_filter=False,
+        distance_threshold_pct=0.003,
+    )
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-05T09:20:00+05:30"),
+            "open": 99.9,
+            "high": 100.2,
+            "low": 99.6,
+            "close": 100.1,
+            "volume": 1500.0,
+            "rolling_volume_avg": 1000.0,
+            "vwap": 99.9,
+            "ema20": 100.0,
+            "sr_support_price": 99.8,
+            "sr_support_touch_count": 3,
+            "sr_resistance_price": 100.8,
+            "sr_resistance_touch_count": 2,
+        }
+    )
+
+    assert strategy.generate_signal(row, flat_context) == "BUY"
+    assert strategy.entry_stop_loss(row=row, signal="BUY", stop_atr_multiple=1.0) == pytest.approx(
+        99.7002
+    )
+
+
+def test_support_resistance_reversal_external_level_respects_cooldown() -> None:
+    strategy = SupportResistanceReversalStrategy(
+        use_external_levels=True,
+        cooldown_candles=10,
+        allow_shorts=True,
+        use_trend_filter=False,
+        distance_threshold_pct=0.003,
+    )
+    flat_context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-05T09:20:00+05:30"),
+            "open": 99.9,
+            "high": 100.2,
+            "low": 99.6,
+            "close": 100.1,
+            "volume": 1500.0,
+            "rolling_volume_avg": 1000.0,
+            "vwap": 99.9,
+            "ema20": 100.0,
+            "sr_support_price": 99.8,
+            "sr_support_touch_count": 3,
+            "sr_resistance_price": 100.8,
+            "sr_resistance_touch_count": 2,
+        }
+    )
+
+    assert strategy.generate_signal(row, flat_context) == "BUY"
+    strategy.entry_stop_loss(row=row, signal="BUY", stop_atr_multiple=1.0)
+
+    next_row = row.copy()
+    next_row["timestamp"] = pd.Timestamp("2026-01-05T09:21:00+05:30")
+    assert strategy.generate_signal(next_row, flat_context) == "HOLD"
+
+
+def test_random_open_direction_is_deterministic_for_same_day_and_seed() -> None:
+    strategy_a = RandomOpenDirectionStrategy(seed=7, allow_shorts=True)
+    strategy_b = RandomOpenDirectionStrategy(seed=7, allow_shorts=True)
+    context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-05T09:15:00+05:30"),
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+        }
+    )
+
+    assert strategy_a.generate_signal(row, context) == strategy_b.generate_signal(row, context)
+
+
+def test_random_open_direction_uses_candle_extreme_as_stop() -> None:
+    strategy = RandomOpenDirectionStrategy(seed=7, allow_shorts=True)
+    context = StrategyContext(
+        in_position=False,
+        available_capital=100_000.0,
+        is_end_of_day=False,
+    )
+    row = pd.Series(
+        {
+            "timestamp": pd.Timestamp("2026-01-05T09:15:00+05:30"),
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+        }
+    )
+
+    signal = strategy.generate_signal(row, context)
+    stop = strategy.entry_stop_loss(row=row, signal=signal, stop_atr_multiple=1.0)
+    if signal == "BUY":
+        assert stop == 99.0
+    else:
+        assert stop == 101.0
