@@ -25,6 +25,7 @@ class BacktestConfig:
     force_end_of_day_exit: bool = True
     allow_shorts: bool = False
     max_entries_per_day: int | None = None
+    stop_after_first_win_per_day: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,7 @@ class Backtester:
 
         equity_rows: list[dict[str, object]] = []
         entries_per_day: dict[object, int] = {}
+        winning_days: set[object] = set()
 
         for i in range(len(candles)):
             row = candles.iloc[i]
@@ -189,6 +191,16 @@ class Backtester:
                                 }
                             )
                             continue
+                    if self.config.stop_after_first_win_per_day and timestamp.date() in winning_days:
+                        equity_rows.append(
+                            {
+                                "timestamp": timestamp,
+                                "capital": float(portfolio.capital),
+                                "equity": float(portfolio.mark_to_market_equity(close)),
+                                "in_position": portfolio.has_open_position,
+                            }
+                        )
+                        continue
                     stop_loss = self.strategy.entry_stop_loss(
                         row=row,
                         signal=signal,
@@ -228,6 +240,16 @@ class Backtester:
                                 }
                             )
                             continue
+                    if self.config.stop_after_first_win_per_day and timestamp.date() in winning_days:
+                        equity_rows.append(
+                            {
+                                "timestamp": timestamp,
+                                "capital": float(portfolio.capital),
+                                "equity": float(portfolio.mark_to_market_equity(close)),
+                                "in_position": portfolio.has_open_position,
+                            }
+                        )
+                        continue
                     stop_loss = self.strategy.entry_stop_loss(
                         row=row,
                         signal=signal,
@@ -256,7 +278,7 @@ class Backtester:
                                 entries_per_day[day_key] = entries_per_day.get(day_key, 0) + 1
             else:
                 if signal in {"SELL", "COVER"}:
-                    portfolio.exit_position(
+                    trade = portfolio.exit_position(
                         timestamp=timestamp,
                         candle_price=close,
                         exit_reason=(
@@ -264,13 +286,17 @@ class Backtester:
                         ),
                         use_stop_fill=False,
                     )
+                    if self.config.stop_after_first_win_per_day and trade.net_pnl > 0:
+                        winning_days.add(timestamp.date())
                 elif self.config.force_end_of_day_exit and is_eod:
-                    portfolio.exit_position(
+                    trade = portfolio.exit_position(
                         timestamp=timestamp,
                         candle_price=close,
                         exit_reason="END_OF_DAY",
                         use_stop_fill=False,
                     )
+                    if self.config.stop_after_first_win_per_day and trade.net_pnl > 0:
+                        winning_days.add(timestamp.date())
 
             equity_rows.append(
                 {

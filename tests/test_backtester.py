@@ -11,8 +11,41 @@ from tradeengine.core.strategy import (
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     RandomOpenDirectionStrategy,
+    StrategyContext,
     VwapRsiMeanReversionStrategy,
 )
+
+
+class _TwoTradeDayStrategy:
+    required_columns: tuple[str, ...] = ()
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> str:
+        minute = pd.Timestamp(row["timestamp"]).minute
+        if context.in_position:
+            return "SELL"
+        if minute in {15, 25, 35}:
+            return "BUY"
+        return "HOLD"
+
+    def entry_stop_loss(self, row: pd.Series, signal: str, stop_atr_multiple: float) -> float | None:
+        del signal, stop_atr_multiple
+        return float(row["close"]) - 1.0
+
+
+class _FirstWinStopsDayStrategy:
+    required_columns: tuple[str, ...] = ()
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> str:
+        ts = pd.Timestamp(row["timestamp"])
+        if context.in_position:
+            return "SELL"
+        if ts.minute in {15, 25, 35}:
+            return "BUY"
+        return "HOLD"
+
+    def entry_stop_loss(self, row: pd.Series, signal: str, stop_atr_multiple: float) -> float | None:
+        del signal, stop_atr_multiple
+        return float(row["close"]) - 1.0
 
 
 def _static_backtest_df() -> pd.DataFrame:
@@ -338,6 +371,77 @@ def test_backtester_honors_max_entries_per_day_limit() -> None:
         config=cfg,
     ).run(df)
     assert len(result.trades) <= 1
+
+
+def test_backtester_honors_max_entries_per_day_for_multiple_signals() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-08T09:15:00+05:30"),
+                pd.Timestamp("2026-01-08T09:20:00+05:30"),
+                pd.Timestamp("2026-01-08T09:25:00+05:30"),
+                pd.Timestamp("2026-01-08T09:30:00+05:30"),
+                pd.Timestamp("2026-01-08T09:35:00+05:30"),
+                pd.Timestamp("2026-01-08T09:40:00+05:30"),
+            ],
+            "open": [100.0, 100.0, 101.0, 101.0, 102.0, 102.0],
+            "high": [100.5, 101.5, 101.5, 102.5, 102.5, 103.0],
+            "low": [99.5, 99.5, 100.5, 100.5, 101.5, 101.5],
+            "close": [100.0, 101.0, 101.0, 102.0, 102.0, 103.0],
+        }
+    )
+    cfg = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=False,
+        max_entries_per_day=2,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(strategy=_TwoTradeDayStrategy(), config=cfg).run(df)
+
+    assert len(result.trades) == 2
+    assert list(result.trades["entry_timestamp"]) == [
+        pd.Timestamp("2026-01-08T09:15:00+05:30"),
+        pd.Timestamp("2026-01-08T09:25:00+05:30"),
+    ]
+
+
+def test_backtester_stops_new_entries_after_first_winning_trade_of_day() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-09T09:15:00+05:30"),
+                pd.Timestamp("2026-01-09T09:20:00+05:30"),
+                pd.Timestamp("2026-01-09T09:25:00+05:30"),
+                pd.Timestamp("2026-01-09T09:30:00+05:30"),
+                pd.Timestamp("2026-01-09T09:35:00+05:30"),
+            ],
+            "open": [100.0, 100.0, 101.0, 101.0, 102.0],
+            "high": [100.5, 101.5, 101.5, 102.5, 103.0],
+            "low": [99.5, 99.5, 100.5, 100.5, 101.5],
+            "close": [100.0, 101.0, 101.0, 102.0, 103.0],
+        }
+    )
+    cfg = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=False,
+        max_entries_per_day=3,
+        stop_after_first_win_per_day=True,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(strategy=_FirstWinStopsDayStrategy(), config=cfg).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["entry_timestamp"] == pd.Timestamp("2026-01-09T09:15:00+05:30")
+    assert trade["net_pnl"] > 0
 
 
 def test_backtester_runs_random_open_direction_strategy() -> None:

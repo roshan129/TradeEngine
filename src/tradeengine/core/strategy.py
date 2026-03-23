@@ -873,6 +873,7 @@ class InsideBarBreakoutStrategy:
     use_volume_filter: bool = True
     use_vwap_trend_filter: bool = False
     use_ema_trend_filter: bool = False
+    allow_longs: bool = True
     allow_shorts: bool = True
     reverse_signals: bool = False
     _current_day: object | None = field(default=None, init=False, repr=False)
@@ -1039,6 +1040,7 @@ class InsideBarBreakoutStrategy:
             breakout_low = self._mother_low
             if (
                 high > breakout_high
+                and self.allow_longs
                 and self._volume_ok(row)
                 and self._trend_ok(row, "BUY")
                 and self._probability_ok(row, "BUY")

@@ -77,17 +77,29 @@ PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
 ```
 
 ```bash
-# Run Inside Bar Breakout on 1-minute data with volume + VWAP filters.
+# Run Inside Bar Breakout using the current research defaults.
 PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
-  --input feature_history_1m_output.csv \
+  --input feature_history_15m_output.csv \
   --strategy inside_bar_breakout \
-  --inside-entry-start 09:20 \
-  --inside-entry-end 10:20 \
-  --inside-max-setup-candles 5 \
-  --inside-min-range-pct 0.0015 \
-  --inside-use-volume-filter \
-  --inside-use-vwap-filter \
-  --max-entries-per-day 5
+  --allow-shorts
+```
+
+Current default research config for `inside_bar_breakout`:
+- mother candle breakout range
+- full day `09:15-15:15`
+- `1.5R`
+- minimum mother candle range `0.35%`
+- max `2` trades per day
+- stop after first winning trade of the day
+- volume and VWAP filters disabled unless explicitly enabled
+
+```bash
+# Example override: use inside-bar range instead of mother-candle range.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input feature_history_15m_output.csv \
+  --strategy inside_bar_breakout \
+  --allow-shorts \
+  --inside-use-inside-range
 ```
 
 ```bash

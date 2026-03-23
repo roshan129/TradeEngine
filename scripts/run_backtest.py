@@ -112,6 +112,12 @@ def parse_args() -> argparse.Namespace:
         help="Limit number of new entries per day (0 means unlimited)",
     )
     parser.add_argument(
+        "--stop-after-first-win-per-day",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Stop taking new entries for the day after the first winning trade (strategy default applies when omitted)",
+    )
+    parser.add_argument(
         "--opening-start",
         default="09:15",
         help="Opening range start for opening_range_breakout in HH:MM (default: 09:15)",
@@ -267,13 +273,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--inside-entry-start",
-        default="09:20",
-        help="Entry window start for inside_bar_breakout in HH:MM (default: 09:20)",
+        default="09:15",
+        help="Entry window start for inside_bar_breakout in HH:MM (default: 09:15)",
     )
     parser.add_argument(
         "--inside-entry-end",
-        default="10:20",
-        help="Entry window end for inside_bar_breakout in HH:MM (default: 10:20)",
+        default="15:15",
+        help="Entry window end for inside_bar_breakout in HH:MM (default: 15:15)",
     )
     parser.add_argument(
         "--inside-max-setup-candles",
@@ -284,8 +290,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--inside-min-range-pct",
         type=float,
-        default=0.0015,
-        help="Minimum mother bar range as pct of close (default: 0.0015 = 0.15%)",
+        default=0.0035,
+        help="Minimum mother bar range as pct of close (default: 0.0035 = 0.35%)",
     )
     parser.add_argument(
         "--inside-use-volume-filter",
@@ -316,8 +322,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--inside-rr-multiple",
         type=float,
-        default=1.0,
-        help="Risk-reward multiple for inside_bar_breakout (default: 1.0)",
+        default=1.5,
+        help="Risk-reward multiple for inside_bar_breakout (default: 1.5)",
     )
     parser.add_argument(
         "--inside-use-inside-range",
@@ -329,6 +335,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Minimum ML probability for inside_bar_breakout entries (default: 0 disables)",
+    )
+    parser.add_argument(
+        "--inside-trade-direction",
+        choices=["both", "long", "short"],
+        default="both",
+        help="Directional entries allowed for inside_bar_breakout (default: both)",
     )
     parser.add_argument(
         "--random-entry-time",
@@ -781,6 +793,8 @@ def main() -> int:
             reverse_signals=args.reverse_signals,
         )
     elif args.strategy == "inside_bar_breakout":
+        inside_allow_longs = args.inside_trade_direction in {"both", "long"}
+        inside_allow_shorts = args.inside_trade_direction in {"both", "short"}
         strategy = InsideBarBreakoutStrategy(
             entry_session_start=_parse_hhmm(args.inside_entry_start),
             entry_session_end=_parse_hhmm(args.inside_entry_end),
@@ -794,7 +808,8 @@ def main() -> int:
             risk_reward_multiple=args.inside_rr_multiple,
             use_inside_bar_range=args.inside_use_inside_range,
             probability_threshold=args.inside_prob_threshold,
-            allow_shorts=short_enabled,
+            allow_longs=inside_allow_longs,
+            allow_shorts=inside_allow_shorts and short_enabled,
             reverse_signals=args.reverse_signals,
         )
     elif args.strategy == "random_open_direction":
@@ -855,6 +870,12 @@ def main() -> int:
         max_entries = 1
     if args.strategy == "support_resistance_reversal" and max_entries is None:
         max_entries = 10
+    if args.strategy == "inside_bar_breakout" and max_entries is None:
+        max_entries = 2
+
+    stop_after_first_win = args.stop_after_first_win_per_day
+    if stop_after_first_win is None:
+        stop_after_first_win = args.strategy == "inside_bar_breakout"
     config = BacktestConfig(
         initial_capital=args.initial_capital,
         risk_per_trade=args.risk_per_trade,
@@ -864,6 +885,7 @@ def main() -> int:
         brokerage_pct=args.brokerage_pct,
         allow_shorts=short_enabled,
         max_entries_per_day=max_entries,
+        stop_after_first_win_per_day=stop_after_first_win,
     )
 
     backtester = Backtester(strategy=strategy, config=config)

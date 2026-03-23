@@ -19,6 +19,7 @@ Live order execution and DB persistence are still out of scope.
   - `vwap_rsi_reversion` (mean reversion baseline)
   - `first_five_minute_momentum` (first 5-minute candle breakout using 1-minute execution)
   - `first_five_minute_fake_breakout` (fade failed breakouts of the first 5-minute candle)
+  - `inside_bar_breakout` (current research default uses mother-candle range, full-day session, 1.5R, min mother range 0.35%, max 2 trades/day, stop after first winning trade)
   - `random_open_direction` (deterministic random long/short entry on a chosen intraday candle)
   - `one_minute_vwap_ema9_scalp` (VWAP+EMA9 pullback scalp with volume confirmation)
   - `support_resistance_reversal` (intraday swing-based support/resistance reversals)
@@ -218,6 +219,18 @@ Optional:
 
 Example:
 - `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_output.csv --raw-output raw_history_ohlcv.csv`
+
+## Current Inside-Bar Research Default
+
+For `inside_bar_breakout`, the current research baseline is:
+
+- mother candle breakout range
+- full day `09:15-15:15`
+- `1.5R`
+- minimum mother candle range `0.35%`
+- max `2` trades per day
+- stop taking new entries after the first winning trade of the day
+- volume and VWAP filters remain off unless enabled explicitly
 
 ## Export Multi-Month 1-Minute Feature History
 
