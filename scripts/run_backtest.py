@@ -23,6 +23,7 @@ from tradeengine.core.strategy import (
     VwapRsiMeanReversionStrategy,
 )
 from tradeengine.ml.models.predictor import ModelPredictor
+from tradeengine.utils.paths import ensure_parent_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,13 +40,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--trades-output",
-        default="backtest_trades.csv",
-        help="Output CSV path for trade log (default: backtest_trades.csv)",
+        default="data/backtests/backtest_trades.csv",
+        help="Output CSV path for trade log (default: data/backtests/backtest_trades.csv)",
     )
     parser.add_argument(
         "--equity-output",
-        default="backtest_equity.csv",
-        help="Output CSV path for equity curve (default: backtest_equity.csv)",
+        default="data/backtests/backtest_equity.csv",
+        help="Output CSV path for equity curve (default: data/backtests/backtest_equity.csv)",
     )
     parser.add_argument("--initial-capital", type=float, default=100_000.0)
     parser.add_argument("--risk-per-trade", type=float, default=0.01)
@@ -703,6 +704,7 @@ def main() -> int:
         for column in probabilities.columns:
             df[column] = probabilities[column]
         if args.predictions_output:
+            ensure_parent_dir(args.predictions_output)
             df.to_csv(args.predictions_output, index=False)
             print(f"Predictions written to: {args.predictions_output}")
 
@@ -891,6 +893,8 @@ def main() -> int:
     backtester = Backtester(strategy=strategy, config=config)
     result = backtester.run(df)
 
+    ensure_parent_dir(args.trades_output)
+    ensure_parent_dir(args.equity_output)
     result.trades.to_csv(args.trades_output, index=False)
     result.equity_curve.to_csv(args.equity_output, index=False)
 

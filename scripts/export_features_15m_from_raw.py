@@ -7,6 +7,7 @@ import pandas as pd
 
 from tradeengine.core.data_processor import MarketDataProcessor
 from tradeengine.core.features import FeatureEngineer
+from tradeengine.utils.paths import ensure_parent_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -16,8 +17,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", required=True, help="Raw OHLCV CSV path (5-minute or 1-minute)")
     parser.add_argument(
         "--output",
-        default="feature_history_15m.csv",
-        help="Output 15-minute features CSV path",
+        default="data/market_data/features/feature_history_15m.csv",
+        help="Output 15-minute features CSV path (default: data/market_data/features/feature_history_15m.csv)",
     )
     parser.add_argument(
         "--raw-output",
@@ -49,8 +50,10 @@ def main() -> int:
     features_df = features_df.sort_values("timestamp", ascending=True).reset_index(drop=True)
 
     if args.raw_output:
+        ensure_parent_dir(args.raw_output)
         clean_df.to_csv(args.raw_output, index=False)
 
+    ensure_parent_dir(args.output)
     features_df.to_csv(args.output, index=False)
     print(f"Saved 15-minute features CSV: {args.output} (rows={len(features_df)})")
     if args.raw_output:

@@ -204,21 +204,21 @@ Optional flags:
 - `--respect-market-hours`
 
 Default output file:
-- `feature_validation_output.csv`
+- `data/market_data/features/feature_validation_output.csv`
 
 ## Export Multi-Month Feature History
 
 Fetch historical 5-minute candles in date chunks, stitch deterministically, clean, and compute features:
 
-- `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_output.csv`
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output data/market_data/features/feature_history_output.csv`
 
 Optional:
 - `--symbol NSE_EQ|INE848E01016` (or uses `UPSTOX_INSTRUMENT_KEY`)
-- `--raw-output raw_history_ohlcv.csv`
+- `--raw-output data/market_data/raw/raw_history_ohlcv.csv`
 - `--pause-seconds 0.2`
 
 Example:
-- `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_output.csv --raw-output raw_history_ohlcv.csv`
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_history.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output data/market_data/features/feature_history_output.csv --raw-output data/market_data/raw/raw_history_ohlcv.csv`
 
 ## Current Inside-Bar Research Default
 
@@ -236,11 +236,11 @@ For `inside_bar_breakout`, the current research baseline is:
 
 Fetch historical 1-minute candles in date chunks, stitch deterministically, clean with 1-minute interval validation, compute features, and add `ema9`:
 
-- `PYTHONPATH=src .venv/bin/python scripts/export_features_1m.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output feature_history_1m_output.csv`
+- `PYTHONPATH=src .venv/bin/python scripts/export_features_1m.py --from-date 2025-10-01 --to-date 2026-03-01 --chunk-days 28 --output data/market_data/features/feature_history_1m_output.csv`
 
 Optional:
 - `--symbol NSE_EQ|INE848E01016` (or uses `UPSTOX_INSTRUMENT_KEY`)
-- `--raw-output raw_history_1m_ohlcv.csv`
+- `--raw-output data/market_data/raw/raw_history_1m_ohlcv.csv`
 - `--pause-seconds 0.2`
 
 ## Validate Indicators Against Reference CSV
@@ -249,7 +249,7 @@ Use comparison report script:
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/feature_validation_report.py \
-  --computed feature_validation_output.csv \
+  --computed data/market_data/features/feature_validation_output.csv \
   --reference tradingview_export.csv \
   --tolerance 0.05
 ```
@@ -279,63 +279,63 @@ Run Sprint 5 labeling tests:
 - `PYTHONPATH=src .venv/bin/python -m pytest -q tests/test_labeling.py`
 
 Run backtest CLI:
-- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_validation_output.csv`
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_validation_output.csv`
 
 EMA+RSI strategy commands:
 - Long-only:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy ema_rsi`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_output.csv --strategy ema_rsi`
 - Long+Short:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy ema_rsi --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_output.csv --strategy ema_rsi --allow-shorts`
 - Reversed signals:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy ema_rsi --reverse-signals`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_output.csv --strategy ema_rsi --reverse-signals`
 
 VWAP+RSI reversion strategy commands:
 - Long-only:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_output.csv --strategy vwap_rsi_reversion`
 - Long+Short (`SHORT` when `close > vwap` and `rsi > 65`):
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_output.csv --strategy vwap_rsi_reversion --allow-shorts`
 - Reversed signals:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_output.csv --strategy vwap_rsi_reversion --reverse-signals`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_output.csv --strategy vwap_rsi_reversion --reverse-signals`
 
 Random open-direction strategy commands:
 - 5-minute random long/short at `09:15` with `1:1` RR:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_5m_sbin.csv --strategy random_open_direction --allow-shorts --random-entry-time 09:15 --random-rr-multiple 1.0 --random-seed 42`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_5m_sbin.csv --strategy random_open_direction --allow-shorts --random-entry-time 09:15 --random-rr-multiple 1.0 --random-seed 42`
 
 First 5-minute candle momentum strategy commands:
 - Breakout of the `09:15-09:20` candle on 1-minute data with `1:1` RR:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-rr-multiple 1.0`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-rr-multiple 1.0`
 - Breakout of the `09:15-09:20` candle with fixed `0.25%` stop and `0.25%` target:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-stop-loss-pct 0.0025 --first-candle-take-profit-pct 0.0025`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-stop-loss-pct 0.0025 --first-candle-take-profit-pct 0.0025`
 
 First 5-minute fake breakout strategy commands:
 - Fade failed first-candle breakouts on 1-minute data with `1:1` RR:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_fake_breakout --allow-shorts --fake-breakout-rr-multiple 1.0`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_1m_sbin.csv --strategy first_five_minute_fake_breakout --allow-shorts --fake-breakout-rr-multiple 1.0`
 - Fade failed first-candle breakouts with fixed `0.25%` stop and `0.5%` target:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_fake_breakout --allow-shorts --fake-breakout-stop-loss-pct 0.0025 --fake-breakout-take-profit-pct 0.005`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_1m_sbin.csv --strategy first_five_minute_fake_breakout --allow-shorts --fake-breakout-stop-loss-pct 0.0025 --fake-breakout-take-profit-pct 0.005`
 
 One-minute VWAP+EMA9 scalp strategy commands:
 - Long-only:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp`
 - Long+Short:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --allow-shorts`
 - Reversed signals:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --reverse-signals`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --reverse-signals`
 - ATR take-profit mode:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --scalp-tp-mode atr`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_scalp --scalp-tp-mode atr`
 
 ICICI-focused one-minute strategy commands:
 - Long+Short with stricter filters:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts`
 - Apply per-day entry cap:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --max-entries-per-day 6`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --max-entries-per-day 6`
 - ATR take-profit mode:
-- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --scalp-tp-mode atr`
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy one_minute_vwap_ema9_icici --allow-shorts --scalp-tp-mode atr`
 
 Support/resistance reversal strategy:
 - Single-timeframe on the input CSV:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_1m_output.csv --strategy support_resistance_reversal --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_1m_output.csv --strategy support_resistance_reversal --allow-shorts`
 - Multi-timeframe: detect structure on 5-minute data, execute on 1-minute data:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_nifty50.csv --structure-input feature_history_36m_5m_nifty50.csv --strategy support_resistance_reversal --allow-shorts`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_1m_nifty50.csv --structure-input data/market_data/features/feature_history_36m_5m_nifty50.csv --strategy support_resistance_reversal --allow-shorts`
 
 ## Recent Breakout Research
 
@@ -348,22 +348,22 @@ SBI (`NSE_EQ|INE062A01020`) has been the primary single-stock research dataset f
 
 Current least-bad tested setup on SBI:
 - Strategy: `first_five_minute_momentum`
-- Dataset: `feature_history_36m_1m_sbin.csv`
+- Dataset: `data/market_data/features/feature_history_36m_1m_sbin.csv`
 - Gap filter: `abs(gap_percent) <= 0.5`
 - Breakout window: `09:20-09:30`
 - Fixed stop loss: `0.25%`
 - Fixed take profit: `0.25%`
 
 Reference command:
-- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-stop-loss-pct 0.0025 --first-candle-take-profit-pct 0.0025 --first-candle-max-gap-percent 0.5 --first-candle-breakout-end 09:30`
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/market_data/features/feature_history_36m_1m_sbin.csv --strategy first_five_minute_momentum --allow-shorts --first-candle-stop-loss-pct 0.0025 --first-candle-take-profit-pct 0.0025 --first-candle-max-gap-percent 0.5 --first-candle-breakout-end 09:30`
 
 ML-driven strategy (uses `prediction` column):
-- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts`
+- `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/ml/predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts`
 - Configure entry window:
-  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts --ml-entry-start 09:20 --ml-entry-end 10:20`
+  - `PYTHONPATH=src .venv/bin/python scripts/run_backtest.py --input data/ml/predictions_12m_5m_t2_full.csv --strategy ml_signal --allow-shorts --ml-entry-start 09:20 --ml-entry-end 10:20`
 
 Build ML dataset:
-- `PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py --input feature_history_output.csv --output ml_dataset.csv`
+- `PYTHONPATH=src .venv/bin/python scripts/build_ml_dataset.py --input data/market_data/features/feature_history_output.csv --output data/ml/ml_dataset.csv`
 
 Optional ML flags:
 - `--horizons 5,10,20`
@@ -374,19 +374,33 @@ Optional ML flags:
 - `--atr-multiplier 0.5`
 
 Train ML model:
-- `PYTHONPATH=src .venv/bin/python scripts/train_model.py --dataset ml_dataset.csv --output models/model_v1.pkl --model-version v1`
+- `PYTHONPATH=src .venv/bin/python scripts/train_model.py --dataset data/ml/ml_dataset.csv --output models/model_v1.pkl --model-version v1`
 
 Evaluate ML model:
-- `PYTHONPATH=src .venv/bin/python scripts/evaluate_model.py --dataset ml_dataset.csv --model models/model_v1.pkl`
+- `PYTHONPATH=src .venv/bin/python scripts/evaluate_model.py --dataset data/ml/ml_dataset.csv --model models/model_v1.pkl`
 
 Walk-forward evaluation:
-- `PYTHONPATH=src .venv/bin/python scripts/walk_forward_evaluate.py --dataset ml_dataset.csv --model models/model_v1.pkl`
+- `PYTHONPATH=src .venv/bin/python scripts/walk_forward_evaluate.py --dataset data/ml/ml_dataset.csv --model models/model_v1.pkl`
 
 Generate predictions with gating:
-- `PYTHONPATH=src .venv/bin/python scripts/predict_from_model.py --model models/model_v1.pkl --input feature_validation_output.csv --output predictions.csv --buy-threshold-proba 0.45 --sell-threshold-proba 0.55`
+- `PYTHONPATH=src .venv/bin/python scripts/predict_from_model.py --model models/model_v1.pkl --input data/market_data/features/feature_validation_output.csv --output data/ml/predictions.csv --buy-threshold-proba 0.45 --sell-threshold-proba 0.55`
 
 OOS validation (9m train / 3m test):
-- `PYTHONPATH=src .venv/bin/python scripts/oos_validate_ml.py --features feature_history_12m_5m_v2.csv --model-output models/model_12m_5m_oos_9m3m_v2.pkl --output-dir oos_results_12m_5m_v2`
+- `PYTHONPATH=src .venv/bin/python scripts/oos_validate_ml.py --features data/market_data/features/feature_history_12m_5m_v2.csv --model-output models/model_12m_5m_oos_9m3m_v2.pkl --output-dir oos_results_12m_5m_v2`
 
 OOS tuning (threshold + risk + stop):
-- `PYTHONPATH=src .venv/bin/python scripts/oos_tune_ml.py --features feature_history_12m_5m_v2.csv --output-dir oos_tune_results_12m_5m_v2 --model-output models/model_12m_5m_tuned_oos_v2.pkl`
+- `PYTHONPATH=src .venv/bin/python scripts/oos_tune_ml.py --features data/market_data/features/feature_history_12m_5m_v2.csv --output-dir oos_tune_results_12m_5m_v2 --model-output models/model_12m_5m_tuned_oos_v2.pkl`
+
+## Set Up A Disciplined Research Loop
+
+Create a research window, an untouched holdout window, and a markdown experiment log:
+
+- `PYTHONPATH=src .venv/bin/python scripts/setup_research_workflow.py --input data/market_data/features/feature_history_36m_5m.csv --strategy-name inside_bar_breakout --research-months 9 --holdout-months 3 --output-dir research_inside_bar`
+
+The script writes:
+
+- `research_window.csv`
+- `holdout_window.csv`
+- `research_weekly_summary.csv`
+- `research_monthly_summary.csv`
+- `RESEARCH_WORKFLOW.md`

@@ -9,6 +9,7 @@ import pandas as pd
 
 from tradeengine.core.backtester import BacktestConfig, Backtester
 from tradeengine.core.strategy import OneMinuteVwapEma9IciciFocusedStrategy
+from tradeengine.utils.paths import ensure_parent_dir
 
 
 def _parse_float_list(value: str) -> list[float]:
@@ -33,7 +34,11 @@ def _parse_time_list(value: str) -> list[time]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Sweep ICICI 1-minute strategy parameters")
     parser.add_argument("--input", required=True, help="Input 1-minute feature CSV")
-    parser.add_argument("--output", default="icici_sweep_results.csv", help="Results CSV path")
+    parser.add_argument(
+        "--output",
+        default="data/backtests/icici_sweep_results.csv",
+        help="Results CSV path (default: data/backtests/icici_sweep_results.csv)",
+    )
     parser.add_argument("--max-entries", default="4,6,8", help="Comma list: max entries per day")
     parser.add_argument("--volume-multipliers", default="1.6,1.8,2.0")
     parser.add_argument("--risk-rewards", default="1.5,1.8,2.0")
@@ -115,6 +120,7 @@ def main() -> int:
 
     out = pd.DataFrame(rows)
     out = out.sort_values(["total_return_pct", "profit_factor", "win_rate"], ascending=False)
+    ensure_parent_dir(args.output)
     out.to_csv(args.output, index=False)
 
     filtered = out[

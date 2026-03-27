@@ -10,6 +10,7 @@ from tradeengine.config import get_upstox_config, settings
 from tradeengine.core.features import FeatureEngineer
 from tradeengine.market_data.service import HistoricalDataService
 from tradeengine.market_data.upstox_client import UpstoxClient
+from tradeengine.utils.paths import ensure_parent_dir
 
 
 def build_feature_dataframe(ignore_market_hours: bool) -> pd.DataFrame:
@@ -64,8 +65,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Export engineered features CSV from Upstox candles")
     parser.add_argument(
         "--output",
-        default="feature_validation_output.csv",
-        help="Output CSV path (default: feature_validation_output.csv)",
+        default="data/market_data/features/feature_validation_output.csv",
+        help="Output CSV path (default: data/market_data/features/feature_validation_output.csv)",
     )
     parser.add_argument(
         "--oldest-first",
@@ -81,6 +82,7 @@ def main() -> int:
 
     features_df = build_feature_dataframe(ignore_market_hours=not args.respect_market_hours)
     features_df = features_df.sort_values("timestamp", ascending=args.oldest_first).reset_index(drop=True)
+    ensure_parent_dir(args.output)
     features_df.to_csv(args.output, index=False)
 
     print(f"Saved {args.output} with {len(features_df)} rows")

@@ -6,12 +6,17 @@ import argparse
 import pandas as pd
 
 from tradeengine.ml.dataset_builder import DatasetBuilder
+from tradeengine.utils.paths import ensure_parent_dir
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build ML dataset from engineered feature CSV")
     parser.add_argument("--input", required=True, help="Input feature CSV path")
-    parser.add_argument("--output", default="ml_dataset.csv", help="Output ML CSV path")
+    parser.add_argument(
+        "--output",
+        default="data/ml/ml_dataset.csv",
+        help="Output ML CSV path (default: data/ml/ml_dataset.csv)",
+    )
     parser.add_argument(
         "--horizons",
         default="5,10,20",
@@ -52,6 +57,7 @@ def main() -> int:
     )
 
     counts = builder.label_counts(ml_df)
+    ensure_parent_dir(args.output)
     ml_df.to_csv(args.output, index=False)
 
     print("ML Dataset Summary")

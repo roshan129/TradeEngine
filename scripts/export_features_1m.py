@@ -15,6 +15,7 @@ from tradeengine.core.features import FeatureEngineer
 from tradeengine.market_data.models import Candle
 from tradeengine.market_data.service import HistoricalDataService
 from tradeengine.market_data.upstox_client import UpstoxClient
+from tradeengine.utils.paths import ensure_parent_dir
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -82,7 +83,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default="feature_history_1m_output.csv",
+        default="data/market_data/features/feature_history_1m_output.csv",
         help="Output 1-minute features CSV path",
     )
     parser.add_argument(
@@ -147,11 +148,13 @@ def main() -> int:
     features_df = features_df.sort_values("timestamp", ascending=True).reset_index(drop=True)
 
     if args.raw_output:
+        ensure_parent_dir(args.raw_output)
         clean_df.sort_values("timestamp", ascending=True).reset_index(drop=True).to_csv(
             args.raw_output,
             index=False,
         )
 
+    ensure_parent_dir(args.output)
     features_df.to_csv(args.output, index=False)
 
     print(f"Saved 1m features CSV: {args.output} (rows={len(features_df)})")
