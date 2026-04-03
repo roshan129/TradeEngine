@@ -64,6 +64,34 @@ def test_add_trend_features_ema_and_vwap_match_manual_calculation() -> None:
     assert math.isclose(out_df.loc[1, "vwap"], manual_vwap_1, rel_tol=1e-12)
 
 
+def test_add_trend_features_resets_vwap_each_trading_day() -> None:
+    engineer = FeatureEngineer()
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-03-03T15:20:00+05:30"),
+                pd.Timestamp("2026-03-03T15:25:00+05:30"),
+                pd.Timestamp("2026-03-04T09:15:00+05:30"),
+                pd.Timestamp("2026-03-04T09:20:00+05:30"),
+            ],
+            "open": [100.0, 102.0, 200.0, 202.0],
+            "high": [101.0, 103.0, 201.0, 203.0],
+            "low": [99.0, 101.0, 199.0, 201.0],
+            "close": [100.0, 102.0, 200.0, 202.0],
+            "volume": [100.0, 100.0, 100.0, 100.0],
+        }
+    )
+
+    out_df = engineer.add_trend_features(df)
+
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
+    assert math.isclose(out_df.loc[2, "vwap"], typical_price.loc[2], rel_tol=1e-12)
+    manual_day_two_second = (typical_price.loc[2:3] * df.loc[2:3, "volume"]).sum() / df.loc[
+        2:3, "volume"
+    ].sum()
+    assert math.isclose(out_df.loc[3, "vwap"], manual_day_two_second, rel_tol=1e-12)
+
+
 def test_add_trend_features_rejects_non_numeric_ohlcv() -> None:
     engineer = FeatureEngineer()
     df = _trend_df(rows=10)

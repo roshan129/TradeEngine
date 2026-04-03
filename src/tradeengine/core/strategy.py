@@ -433,6 +433,504 @@ class OpeningRangeBreakoutStrategy:
 
 
 @dataclass
+class OpeningRangePullbackStrategy:
+    """Trade a pullback to the opening-range breakout level after confirmation."""
+
+    opening_start: time = time(hour=9, minute=15)
+    opening_end: time = time(hour=9, minute=25)
+    entry_end: time = time(hour=11, minute=0)
+    session_exit_time: time = time(hour=15, minute=15)
+    risk_reward_multiple: float = 1.5
+    pullback_tolerance_pct: float = 0.001
+    allow_shorts: bool = True
+    reverse_signals: bool = False
+    _current_day: object | None = field(default=None, init=False, repr=False)
+    _opening_high: float | None = field(default=None, init=False, repr=False)
+    _opening_low: float | None = field(default=None, init=False, repr=False)
+    _opening_complete: bool = field(default=False, init=False, repr=False)
+    _breakout_side: Signal = field(default="HOLD", init=False, repr=False)
+    _breakout_level: float | None = field(default=None, init=False, repr=False)
+    _breakout_timestamp: pd.Timestamp | None = field(default=None, init=False, repr=False)
+    _trade_taken: bool = field(default=False, init=False, repr=False)
+    _pending_stop_loss: float | None = field(default=None, init=False, repr=False)
+
+    required_columns: tuple[str, ...] = ()
+
+    def _reset_day(self, day: object) -> None:
+        self._current_day = day
+        self._opening_high = None
+        self._opening_low = None
+        self._opening_complete = False
+        self._breakout_side = "HOLD"
+        self._breakout_level = None
+        self._breakout_timestamp = None
+        self._trade_taken = False
+        self._pending_stop_loss = None
+
+    def _update_opening_range(self, row: pd.Series, candle_time: time) -> None:
+        if self.opening_start <= candle_time <= self.opening_end:
+            high = float(row.get("high", float("nan")))
+            low = float(row.get("low", float("nan")))
+            if pd.isna(high) or pd.isna(low):
+                return
+            if self._opening_high is None or high > self._opening_high:
+                self._opening_high = high
+            if self._opening_low is None or low < self._opening_low:
+                self._opening_low = low
+
+        if candle_time > self.opening_end:
+            self._opening_complete = True
+
+    def _set_breakout(self, side: Signal, timestamp: pd.Timestamp) -> None:
+        self._breakout_side = side
+        self._breakout_timestamp = timestamp
+        self._breakout_level = self._opening_high if side == "BUY" else self._opening_low
+
+    def _clear_breakout(self) -> None:
+        self._breakout_side = "HOLD"
+        self._breakout_level = None
+        self._breakout_timestamp = None
+
+    def _pullback_signal(self, row: pd.Series) -> Signal:
+        if (
+            self._breakout_side not in {"BUY", "SHORT"}
+            or self._breakout_level is None
+            or self._opening_high is None
+            or self._opening_low is None
+        ):
+            return "HOLD"
+
+        close = float(row.get("close", float("nan")))
+        high = float(row.get("high", float("nan")))
+        low = float(row.get("low", float("nan")))
+        if pd.isna(close) or pd.isna(high) or pd.isna(low):
+            return "HOLD"
+
+        tolerance = abs(self._breakout_level) * max(self.pullback_tolerance_pct, 0.0)
+
+        if self._breakout_side == "BUY":
+            if close < self._opening_low:
+                self._clear_breakout()
+                return "HOLD"
+            if low <= self._breakout_level + tolerance and close >= self._breakout_level:
+                self._pending_stop_loss = self._opening_low
+                return "BUY"
+            return "HOLD"
+
+        if close > self._opening_high:
+            self._clear_breakout()
+            return "HOLD"
+        if high >= self._breakout_level - tolerance and close <= self._breakout_level:
+            self._pending_stop_loss = self._opening_high
+            return "SHORT"
+        return "HOLD"
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        ts = row.get("timestamp")
+        if ts is None:
+            return "HOLD"
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return "HOLD"
+
+        candle_day = timestamp.date()
+        candle_time = timestamp.time()
+        if candle_day != self._current_day:
+            self._reset_day(candle_day)
+
+        self._update_opening_range(row, candle_time)
+
+        if context.in_position:
+            if context.position_side is None:
+                return "HOLD"
+            if context.is_end_of_day or candle_time >= self.session_exit_time:
+                return "SELL" if context.position_side == "LONG" else "COVER"
+            if context.position_entry_price is None or context.position_stop_loss is None:
+                return "HOLD"
+
+            entry_price = context.position_entry_price
+            stop_loss = context.position_stop_loss
+            risk = abs(entry_price - stop_loss)
+            if risk <= 0:
+                return "HOLD"
+
+            high = float(row.get("high", float("nan")))
+            low = float(row.get("low", float("nan")))
+            if pd.isna(high) or pd.isna(low):
+                return "HOLD"
+
+            if context.position_side == "LONG":
+                target = entry_price + (risk * self.risk_reward_multiple)
+                return "SELL" if high >= target else "HOLD"
+
+            target = entry_price - (risk * self.risk_reward_multiple)
+            return "COVER" if low <= target else "HOLD"
+
+        if self._trade_taken or not self._opening_complete:
+            return "HOLD"
+        if self._opening_high is None or self._opening_low is None:
+            return "HOLD"
+        if candle_time > self.entry_end:
+            return "HOLD"
+
+        if self._breakout_side == "HOLD":
+            high = float(row.get("high", float("nan")))
+            low = float(row.get("low", float("nan")))
+            if pd.isna(high) or pd.isna(low):
+                return "HOLD"
+            long_breakout = high > self._opening_high
+            short_breakout = low < self._opening_low
+            if long_breakout and short_breakout:
+                return "HOLD"
+            if long_breakout:
+                self._set_breakout("BUY", timestamp)
+                return "HOLD"
+            if short_breakout and self.allow_shorts:
+                self._set_breakout("SHORT", timestamp)
+                return "HOLD"
+            return "HOLD"
+
+        if self._breakout_timestamp is not None and timestamp <= self._breakout_timestamp:
+            return "HOLD"
+
+        signal = self._pullback_signal(row)
+        if signal == "HOLD":
+            return "HOLD"
+
+        self._trade_taken = True
+        if self.reverse_signals:
+            reversed_signal = reverse_signal(signal)
+            self._pending_stop_loss = (
+                self._opening_low if reversed_signal == "BUY" else self._opening_high
+            )
+            return reversed_signal
+        return signal
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        del row, signal, stop_atr_multiple
+        stop_loss = self._pending_stop_loss
+        self._pending_stop_loss = None
+        return stop_loss
+
+
+@dataclass
+class VwapTrendContinuationStrategy:
+    """Trade shallow continuation pullbacks that hold above a rising VWAP."""
+
+    entry_session_start: time = time(hour=9, minute=20)
+    entry_session_end: time = time(hour=11, minute=0)
+    session_exit_time: time = time(hour=15, minute=15)
+    exit_mode: Literal["rr", "vwap_break", "trailing_low"] = "vwap_break"
+    risk_reward_multiple: float = 2.0
+    min_vwap_slope_pct: float = 0.0001
+    vwap_slope_lookback_bars: int = 3
+    min_candles_above_vwap: int = 3
+    min_distance_above_vwap_pct: float = 0.001
+    pullback_lookback_bars: int = 5
+    min_pullback_size_pct: float = 0.001
+    max_pullback_size_pct: float = 0.002
+    fixed_stop_loss_pct: float = 0.003
+    pullback_low_buffer_pct: float = 0.0
+    min_atr_pct: float = 0.0
+    min_bb_width: float = 0.0
+    use_ema_trend_filter: bool = False
+    allow_shorts: bool = False
+    reverse_signals: bool = False
+    _current_day: object | None = field(default=None, init=False, repr=False)
+    _previous_close: float | None = field(default=None, init=False, repr=False)
+    _previous_vwap: float | None = field(default=None, init=False, repr=False)
+    _previous_high: float | None = field(default=None, init=False, repr=False)
+    _previous_low: float | None = field(default=None, init=False, repr=False)
+    _recent_closes: deque[float] = field(default_factory=deque, init=False, repr=False)
+    _recent_vwaps: deque[float] = field(default_factory=deque, init=False, repr=False)
+    _recent_highs: deque[float] = field(default_factory=deque, init=False, repr=False)
+    _recent_lows: deque[float] = field(default_factory=deque, init=False, repr=False)
+    _pending_setup_high: float | None = field(default=None, init=False, repr=False)
+    _pending_setup_low: float | None = field(default=None, init=False, repr=False)
+    _pending_stop_loss: float | None = field(default=None, init=False, repr=False)
+
+    @property
+    def required_columns(self) -> tuple[str, ...]:
+        columns = ["open", "high", "low", "close", "vwap"]
+        if self.use_ema_trend_filter:
+            columns.extend(["ema20", "ema50"])
+        if self.min_atr_pct > 0:
+            columns.append("atr")
+        if self.min_bb_width > 0:
+            columns.append("bb_width")
+        return tuple(columns)
+
+    def _reset_day(self, day: object) -> None:
+        self._current_day = day
+        self._previous_close = None
+        self._previous_vwap = None
+        self._previous_high = None
+        self._previous_low = None
+        self._recent_closes.clear()
+        self._recent_vwaps.clear()
+        self._recent_highs.clear()
+        self._recent_lows.clear()
+        self._pending_setup_high = None
+        self._pending_setup_low = None
+        self._pending_stop_loss = None
+
+    def _finalize_row(self, close: float, vwap: float, high: float, low: float) -> None:
+        self._previous_close = close
+        self._previous_vwap = vwap
+        self._previous_high = high
+        self._previous_low = low
+        self._recent_closes.append(close)
+        self._recent_vwaps.append(vwap)
+        self._recent_highs.append(high)
+        self._recent_lows.append(low)
+        max_history = max(
+            2,
+            self.vwap_slope_lookback_bars + 1,
+            self.min_candles_above_vwap,
+            self.pullback_lookback_bars,
+        )
+        while len(self._recent_closes) > max_history:
+            self._recent_closes.popleft()
+        while len(self._recent_vwaps) > max_history:
+            self._recent_vwaps.popleft()
+        while len(self._recent_highs) > max_history:
+            self._recent_highs.popleft()
+        while len(self._recent_lows) > max_history:
+            self._recent_lows.popleft()
+
+    def _in_entry_session(self, candle_time: time) -> bool:
+        return self.entry_session_start <= candle_time <= self.entry_session_end
+
+    def _vwap_slope_ok(self, vwap: float, side: Signal) -> bool:
+        lookback = max(1, self.vwap_slope_lookback_bars)
+        if len(self._recent_vwaps) < lookback:
+            return False
+        reference_vwap = list(self._recent_vwaps)[-lookback]
+        if reference_vwap <= 0:
+            return False
+        slope_pct = (vwap - reference_vwap) / reference_vwap
+        if side == "BUY":
+            return slope_pct >= self.min_vwap_slope_pct
+        if side == "SHORT":
+            return slope_pct <= -self.min_vwap_slope_pct
+        return False
+
+    def _recent_strength_ok(self) -> bool:
+        lookback = max(1, self.min_candles_above_vwap)
+        if len(self._recent_lows) < lookback or len(self._recent_vwaps) < lookback:
+            return False
+
+        recent_lows = list(self._recent_lows)[-lookback:]
+        recent_closes = list(self._recent_closes)[-lookback:]
+        recent_vwaps = list(self._recent_vwaps)[-lookback:]
+        for low, close, vwap in zip(recent_lows, recent_closes, recent_vwaps, strict=False):
+            if vwap <= 0:
+                return False
+            min_price = vwap * (1.0 + self.min_distance_above_vwap_pct)
+            if low <= vwap or close <= min_price:
+                return False
+        return True
+
+    def _regime_ok(self, row: pd.Series, close: float) -> bool:
+        atr = float(row.get("atr", float("nan")))
+        bb_width = float(row.get("bb_width", float("nan")))
+        if self.min_atr_pct > 0:
+            if pd.isna(atr) or close <= 0 or (atr / close) < self.min_atr_pct:
+                return False
+        if self.min_bb_width > 0:
+            if pd.isna(bb_width) or bb_width < self.min_bb_width:
+                return False
+        return True
+
+    def _trend_filter_ok(self, row: pd.Series) -> bool:
+        if not self.use_ema_trend_filter:
+            return True
+        ema20 = float(row.get("ema20", float("nan")))
+        ema50 = float(row.get("ema50", float("nan")))
+        if pd.isna(ema20) or pd.isna(ema50):
+            return False
+        return ema20 > ema50
+
+    def _pullback_size_pct(self, low: float) -> float | None:
+        lookback = max(1, self.pullback_lookback_bars)
+        if len(self._recent_highs) < lookback:
+            return None
+        swing_high = max(list(self._recent_highs)[-lookback:])
+        if swing_high <= 0 or low >= swing_high:
+            return None
+        return (swing_high - low) / swing_high
+
+    def _prepare_long_setup(self, row: pd.Series) -> bool:
+        high = float(row.get("high", float("nan")))
+        low = float(row.get("low", float("nan")))
+        close = float(row.get("close", float("nan")))
+        vwap = float(row.get("vwap", float("nan")))
+        if any(pd.isna(value) for value in (high, low, close, vwap)):
+            return False
+        if close <= 0 or vwap <= 0:
+            return False
+        if close <= vwap or low <= vwap:
+            return False
+        if not self._trend_filter_ok(row):
+            return False
+        if not self._regime_ok(row, close):
+            return False
+        if not self._recent_strength_ok():
+            return False
+        if not self._vwap_slope_ok(vwap, "BUY"):
+            return False
+        if self._previous_close is not None and close >= self._previous_close:
+            return False
+
+        close_distance_pct = (close - vwap) / vwap
+        if close_distance_pct < self.min_distance_above_vwap_pct:
+            return False
+
+        pullback_size_pct = self._pullback_size_pct(low)
+        if pullback_size_pct is None:
+            return False
+        if pullback_size_pct < self.min_pullback_size_pct:
+            return False
+        if pullback_size_pct > self.max_pullback_size_pct:
+            return False
+
+        self._pending_setup_high = high
+        self._pending_setup_low = low
+        return True
+
+    @staticmethod
+    def _unrealized_pnl_pct(
+        close: float,
+        entry_price: float,
+        side: PositionSide,
+    ) -> float:
+        if entry_price <= 0:
+            return 0.0
+        if side == "LONG":
+            return (close - entry_price) / entry_price
+        return (entry_price - close) / entry_price
+
+    def _compute_entry_stop_loss(self, entry_close: float) -> float | None:
+        if self._pending_setup_low is None:
+            return None
+
+        stop_loss = self._pending_setup_low * (1.0 - self.pullback_low_buffer_pct)
+        if self.fixed_stop_loss_pct > 0 and entry_close > 0:
+            fixed_stop = entry_close * (1.0 - self.fixed_stop_loss_pct)
+            stop_loss = max(stop_loss, fixed_stop)
+        return stop_loss
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        ts = row.get("timestamp")
+        if ts is None:
+            return "HOLD"
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return "HOLD"
+
+        candle_day = timestamp.date()
+        candle_time = timestamp.time()
+        if candle_day != self._current_day:
+            self._reset_day(candle_day)
+
+        high = float(row.get("high", float("nan")))
+        low = float(row.get("low", float("nan")))
+        close = float(row.get("close", float("nan")))
+        vwap = float(row.get("vwap", float("nan")))
+        if pd.isna(high) or pd.isna(low) or pd.isna(close) or pd.isna(vwap):
+            return "HOLD"
+
+        signal: Signal = "HOLD"
+        try:
+            if context.in_position:
+                if context.position_side is None:
+                    return "HOLD"
+                if context.is_end_of_day or candle_time >= self.session_exit_time:
+                    signal = "SELL" if context.position_side == "LONG" else "COVER"
+                    return reverse_signal(signal) if self.reverse_signals else signal
+                if context.position_entry_price is None or context.position_stop_loss is None:
+                    return "HOLD"
+
+                entry_price = context.position_entry_price
+                stop_loss = context.position_stop_loss
+                risk = abs(entry_price - stop_loss)
+                if risk <= 0:
+                    return "HOLD"
+
+                if self.exit_mode == "rr":
+                    if context.position_side == "LONG":
+                        target = entry_price + (risk * self.risk_reward_multiple)
+                        if high >= target:
+                            signal = "SELL"
+                            return reverse_signal(signal) if self.reverse_signals else signal
+                    else:
+                        target = entry_price - (risk * self.risk_reward_multiple)
+                        if low <= target:
+                            signal = "COVER"
+                            return reverse_signal(signal) if self.reverse_signals else signal
+                elif self.exit_mode == "vwap_break":
+                    if context.position_side == "LONG" and close < vwap:
+                        signal = "SELL"
+                        return reverse_signal(signal) if self.reverse_signals else signal
+                    if context.position_side == "SHORT" and close > vwap:
+                        signal = "COVER"
+                        return reverse_signal(signal) if self.reverse_signals else signal
+                elif self.exit_mode == "trailing_low":
+                    if context.position_side == "LONG" and self._previous_low is not None:
+                        if close < self._previous_low:
+                            signal = "SELL"
+                            return reverse_signal(signal) if self.reverse_signals else signal
+                    if context.position_side == "SHORT" and self._previous_high is not None:
+                        if close > self._previous_high:
+                            signal = "COVER"
+                            return reverse_signal(signal) if self.reverse_signals else signal
+                return reverse_signal(signal) if self.reverse_signals else signal
+
+            if not self._in_entry_session(candle_time):
+                return "HOLD"
+            if self._previous_vwap is None:
+                return "HOLD"
+
+            if (
+                self._pending_setup_high is not None
+                and high > self._pending_setup_high
+                and close > vwap
+                and low > vwap
+                and self._trend_filter_ok(row)
+                and self._regime_ok(row, close)
+                and self._vwap_slope_ok(vwap, "BUY")
+            ):
+                self._pending_stop_loss = self._compute_entry_stop_loss(close)
+                signal = "BUY" if self._pending_stop_loss is not None else "HOLD"
+                self._pending_setup_high = None
+                self._pending_setup_low = None
+                return reverse_signal(signal) if self.reverse_signals else signal
+
+            self._pending_setup_high = None
+            self._pending_setup_low = None
+            self._prepare_long_setup(row)
+            return reverse_signal(signal) if self.reverse_signals else signal
+        finally:
+            self._finalize_row(close, vwap, high, low)
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        del row, signal, stop_atr_multiple
+        stop_loss = self._pending_stop_loss
+        self._pending_stop_loss = None
+        return stop_loss
+
+
+@dataclass
 class FirstFiveMinuteCandleMomentumStrategy:
     """Trade the breakout of the first five-minute candle using one-minute execution."""
 
@@ -859,10 +1357,14 @@ class FirstFiveMinuteFakeBreakoutStrategy:
 class InsideBarBreakoutStrategy:
     """Inside bar breakout strategy with 1:1 RR and optional filters."""
 
-    entry_session_start: time = time(hour=9, minute=20)
-    entry_session_end: time = time(hour=10, minute=20)
-    max_setup_candles: int = 5
+    entry_session_start: time = time(hour=9, minute=15)
+    entry_session_end: time = time(hour=15, minute=15)
+    session_exit_time: time = time(hour=15, minute=15)
+    max_setup_candles: int = 0
+    max_holding_candles_without_profit: int = 0
     min_mother_range_pct: float = 0.0015
+    max_stop_loss_pct: float = 0.0
+    min_distance_from_open: float = 0.0
     use_atr_stop: bool = False
     atr_stop_multiple: float = 1.0
     risk_reward_multiple: float = 1.0
@@ -870,7 +1372,7 @@ class InsideBarBreakoutStrategy:
     probability_threshold: float = 0.0
     buy_probability_column: str = "buy_probability"
     sell_probability_column: str = "sell_probability"
-    use_volume_filter: bool = True
+    use_volume_filter: bool = False
     use_vwap_trend_filter: bool = False
     use_ema_trend_filter: bool = False
     allow_longs: bool = True
@@ -885,10 +1387,13 @@ class InsideBarBreakoutStrategy:
     _prev_high: float | None = field(default=None, init=False, repr=False)
     _prev_low: float | None = field(default=None, init=False, repr=False)
     _clear_after_entry: bool = field(default=False, init=False, repr=False)
+    _position_entry_bar: int | None = field(default=None, init=False, repr=False)
 
     @property
     def required_columns(self) -> tuple[str, ...]:
         columns = ["high", "low", "close", "volume"]
+        if self.min_distance_from_open > 0:
+            columns.append("distance_from_open")
         if self.use_volume_filter:
             columns.append("rolling_volume_avg")
         if self.use_vwap_trend_filter:
@@ -910,6 +1415,7 @@ class InsideBarBreakoutStrategy:
         self._mother_low = None
         self._prev_high = None
         self._prev_low = None
+        self._position_entry_bar = None
 
     def _in_session(self, candle_time: time) -> bool:
         return self.entry_session_start <= candle_time <= self.entry_session_end
@@ -968,11 +1474,26 @@ class InsideBarBreakoutStrategy:
             return False
         return (mother_high - mother_low) / close > self.min_mother_range_pct
 
+    def _open_distance_ok(self, row: pd.Series, side: Signal) -> bool:
+        if self.min_distance_from_open <= 0:
+            return True
+        distance_from_open = float(row.get("distance_from_open", float("nan")))
+        if pd.isna(distance_from_open):
+            return False
+        if side == "BUY":
+            return distance_from_open >= self.min_distance_from_open
+        if side == "SELL":
+            return distance_from_open <= -self.min_distance_from_open
+        return True
+
     def _store_setup(self, mother_high: float, mother_low: float) -> None:
         self._setup_active = True
         self._mother_high = mother_high
         self._mother_low = mother_low
-        self._setup_expires_at = self._bar_index + max(self.max_setup_candles, 1)
+        if self.max_setup_candles > 0:
+            self._setup_expires_at = self._bar_index + self.max_setup_candles
+        else:
+            self._setup_expires_at = None
 
     def _clear_setup(self) -> None:
         self._setup_active = False
@@ -999,7 +1520,7 @@ class InsideBarBreakoutStrategy:
         if context.in_position:
             if context.position_side is None:
                 return "HOLD"
-            if candle_time >= self.entry_session_end:
+            if candle_time >= self.session_exit_time:
                 return "SELL" if context.position_side == "LONG" else "COVER"
             if context.position_entry_price is None or context.position_stop_loss is None:
                 return "HOLD"
@@ -1012,14 +1533,28 @@ class InsideBarBreakoutStrategy:
 
             high = float(row.get("high", float("nan")))
             low = float(row.get("low", float("nan")))
-            if pd.isna(high) or pd.isna(low):
+            close = float(row.get("close", float("nan")))
+            if pd.isna(high) or pd.isna(low) or pd.isna(close):
                 return "HOLD"
+
+            if (
+                self.max_holding_candles_without_profit > 0
+                and self._position_entry_bar is not None
+                and (self._bar_index - self._position_entry_bar)
+                >= self.max_holding_candles_without_profit
+            ):
+                if context.position_side == "LONG" and close <= entry_price:
+                    return "SELL"
+                if context.position_side == "SHORT" and close >= entry_price:
+                    return "COVER"
 
             if context.position_side == "LONG":
                 target = entry_price + (risk * self.risk_reward_multiple)
                 return "SELL" if high >= target else "HOLD"
             target = entry_price - (risk * self.risk_reward_multiple)
             return "COVER" if low <= target else "HOLD"
+
+        self._position_entry_bar = None
 
         if not self._in_session(candle_time):
             self._clear_setup()
@@ -1041,22 +1576,26 @@ class InsideBarBreakoutStrategy:
             if (
                 high > breakout_high
                 and self.allow_longs
+                and self._open_distance_ok(row, "BUY")
                 and self._volume_ok(row)
                 and self._trend_ok(row, "BUY")
                 and self._probability_ok(row, "BUY")
             ):
                 self._setup_active = False
                 self._clear_after_entry = True
+                self._position_entry_bar = self._bar_index
                 return "SHORT" if self.reverse_signals else "BUY"
             if (
                 low < breakout_low
                 and self.allow_shorts
+                and self._open_distance_ok(row, "SELL")
                 and self._volume_ok(row)
                 and self._trend_ok(row, "SELL")
                 and self._probability_ok(row, "SELL")
             ):
                 self._setup_active = False
                 self._clear_after_entry = True
+                self._position_entry_bar = self._bar_index
                 return "BUY" if self.reverse_signals else "SHORT"
             return "HOLD"
 
@@ -1112,9 +1651,182 @@ class InsideBarBreakoutStrategy:
         else:
             stop = None
 
+        if stop is not None and self.max_stop_loss_pct > 0:
+            close = float(row.get("close", float("nan")))
+            if pd.isna(close) or close <= 0:
+                return None
+            stop_distance_pct = abs(close - stop) / close
+            if stop_distance_pct > self.max_stop_loss_pct:
+                if signal == "BUY":
+                    stop = close * (1.0 - self.max_stop_loss_pct)
+                elif signal == "SHORT":
+                    stop = close * (1.0 + self.max_stop_loss_pct)
+
         if self._clear_after_entry:
             self._clear_setup()
         return stop
+
+
+@dataclass
+class InsideBarFakeBreakoutReversalStrategy:
+    """Trade the reversal after an inside-bar breakout fails back into the mother range."""
+
+    entry_session_start: time = time(hour=9, minute=15)
+    entry_session_end: time = time(hour=15, minute=15)
+    session_exit_time: time = time(hour=15, minute=15)
+    risk_reward_multiple: float = 1.0
+    max_stop_loss_pct: float = 0.006
+    allow_longs: bool = True
+    allow_shorts: bool = True
+    reverse_signals: bool = False
+    _current_day: object | None = field(default=None, init=False, repr=False)
+    _mother_high: float | None = field(default=None, init=False, repr=False)
+    _mother_low: float | None = field(default=None, init=False, repr=False)
+    _prev_high: float | None = field(default=None, init=False, repr=False)
+    _prev_low: float | None = field(default=None, init=False, repr=False)
+    _breakout_side: Signal | None = field(default=None, init=False, repr=False)
+    _breakout_extreme: float | None = field(default=None, init=False, repr=False)
+    _pending_stop_loss: float | None = field(default=None, init=False, repr=False)
+
+    @property
+    def required_columns(self) -> tuple[str, ...]:
+        return ("high", "low", "close")
+
+    def _reset_day(self, day: object) -> None:
+        self._current_day = day
+        self._mother_high = None
+        self._mother_low = None
+        self._prev_high = None
+        self._prev_low = None
+        self._breakout_side = None
+        self._breakout_extreme = None
+        self._pending_stop_loss = None
+
+    def _clear_setup(self) -> None:
+        self._mother_high = None
+        self._mother_low = None
+        self._breakout_side = None
+        self._breakout_extreme = None
+        self._pending_stop_loss = None
+
+    def _clear_setup_keep_pending_stop(self) -> None:
+        self._mother_high = None
+        self._mother_low = None
+        self._breakout_side = None
+        self._breakout_extreme = None
+
+    def _in_entry_session(self, candle_time: time) -> bool:
+        return self.entry_session_start <= candle_time <= self.entry_session_end
+
+    def _capped_stop(self, close: float, stop: float, signal: Signal) -> float:
+        if self.max_stop_loss_pct <= 0 or close <= 0:
+            return stop
+        stop_distance_pct = abs(close - stop) / close
+        if stop_distance_pct <= self.max_stop_loss_pct:
+            return stop
+        if signal == "BUY":
+            return close * (1.0 - self.max_stop_loss_pct)
+        if signal == "SHORT":
+            return close * (1.0 + self.max_stop_loss_pct)
+        return stop
+
+    def generate_signal(self, row: pd.Series, context: StrategyContext) -> Signal:
+        ts = row.get("timestamp")
+        if ts is None:
+            return "HOLD"
+        timestamp = pd.Timestamp(ts)
+        if pd.isna(timestamp):
+            return "HOLD"
+
+        candle_day = timestamp.date()
+        candle_time = timestamp.time()
+        if candle_day != self._current_day:
+            self._reset_day(candle_day)
+
+        high = float(row.get("high", float("nan")))
+        low = float(row.get("low", float("nan")))
+        close = float(row.get("close", float("nan")))
+        if pd.isna(high) or pd.isna(low) or pd.isna(close):
+            return "HOLD"
+
+        if context.in_position:
+            if context.position_side is None:
+                return "HOLD"
+            if candle_time >= self.session_exit_time:
+                return "SELL" if context.position_side == "LONG" else "COVER"
+            if context.position_entry_price is None or context.position_stop_loss is None:
+                return "HOLD"
+
+            entry_price = context.position_entry_price
+            stop_loss = context.position_stop_loss
+            risk = abs(entry_price - stop_loss)
+            if risk <= 0:
+                return "HOLD"
+
+            if context.position_side == "LONG":
+                target = entry_price + (risk * self.risk_reward_multiple)
+                return "SELL" if high >= target else "HOLD"
+            target = entry_price - (risk * self.risk_reward_multiple)
+            return "COVER" if low <= target else "HOLD"
+
+        if not self._in_entry_session(candle_time):
+            return "HOLD"
+
+        if self._mother_high is not None and self._mother_low is not None:
+            if self._breakout_side is None:
+                if high > self._mother_high:
+                    self._breakout_side = "BUY"
+                    self._breakout_extreme = high
+                elif low < self._mother_low:
+                    self._breakout_side = "SHORT"
+                    self._breakout_extreme = low
+            elif self._breakout_side == "BUY":
+                self._breakout_extreme = (
+                    high
+                    if self._breakout_extreme is None
+                    else max(self._breakout_extreme, high)
+                )
+                if close < self._mother_high and close >= self._mother_low and self.allow_shorts:
+                    self._pending_stop_loss = self._capped_stop(close, float(self._breakout_extreme), "SHORT")
+                    self._clear_setup_keep_pending_stop()
+                    return "BUY" if self.reverse_signals else "SHORT"
+            elif self._breakout_side == "SHORT":
+                self._breakout_extreme = (
+                    low
+                    if self._breakout_extreme is None
+                    else min(self._breakout_extreme, low)
+                )
+                if close > self._mother_low and close <= self._mother_high and self.allow_longs:
+                    self._pending_stop_loss = self._capped_stop(close, float(self._breakout_extreme), "BUY")
+                    self._clear_setup_keep_pending_stop()
+                    return "SHORT" if self.reverse_signals else "BUY"
+
+        if self._prev_high is None or self._prev_low is None:
+            self._prev_high = high
+            self._prev_low = low
+            return "HOLD"
+
+        inside_bar = high <= self._prev_high and low >= self._prev_low
+        if inside_bar:
+            self._mother_high = self._prev_high
+            self._mother_low = self._prev_low
+            self._breakout_side = None
+            self._breakout_extreme = None
+
+        self._prev_high = high
+        self._prev_low = low
+        return "HOLD"
+
+    def entry_stop_loss(
+        self,
+        row: pd.Series,
+        signal: Signal,
+        stop_atr_multiple: float,
+    ) -> float | None:
+        del row, signal, stop_atr_multiple
+        stop_loss = self._pending_stop_loss
+        self._pending_stop_loss = None
+        return stop_loss
 
 
 @dataclass

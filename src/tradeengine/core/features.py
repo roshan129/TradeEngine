@@ -121,8 +121,10 @@ class FeatureEngineer:
 
         typical_price = (clean_df["high"] + clean_df["low"] + clean_df["close"]) / 3.0
         tpv = typical_price * clean_df["volume"]
-        cumulative_volume = clean_df["volume"].cumsum()
-        vwap = tpv.cumsum() / cumulative_volume
+        session_key = clean_df["timestamp"].dt.normalize()
+        cumulative_volume = clean_df.groupby(session_key, sort=False)["volume"].cumsum()
+        cumulative_tpv = tpv.groupby(session_key, sort=False).cumsum()
+        vwap = cumulative_tpv / cumulative_volume
         zero_volume_mask = cumulative_volume == 0
         if zero_volume_mask.any():
             # Index data can report zero volume; fall back to typical price for VWAP.

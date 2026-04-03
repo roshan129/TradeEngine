@@ -125,6 +125,79 @@ PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
 ```
 
 ```bash
+# Run the tuned VWAP continuation baseline for liquid names like SBI/ICICI.
+PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
+  --input data/market_data/features/feature_history_36m_5m_sbin.csv \
+  --strategy vwap_trend_continuation \
+  --vwap-trend-entry-start 09:20 \
+  --vwap-trend-entry-end 10:45 \
+  --vwap-trend-exit-mode vwap_break \
+  --vwap-trend-min-candles-above-vwap 5 \
+  --vwap-trend-min-distance-above-vwap-pct 0.0015 \
+  --vwap-trend-pullback-lookback-bars 5 \
+  --vwap-trend-min-pullback-pct 0.0015 \
+  --vwap-trend-max-pullback-pct 0.0015 \
+  --vwap-trend-fixed-stop-loss-pct 0.003 \
+  --vwap-trend-vwap-slope-lookback-bars 3 \
+  --vwap-trend-min-vwap-slope-pct 0.0001 \
+  --vwap-trend-use-ema-filter \
+  --max-entries-per-day 1 \
+  --stop-after-first-win-per-day
+```
+
+Current tuned default for `vwap_trend_continuation`:
+- long-only
+- entry window `09:20-10:45`
+- exit mode `vwap_break`
+- minimum `5` candles holding above VWAP
+- minimum distance above VWAP `0.15%`
+- pullback size `0.15%`
+- fixed stop cap `0.30%`
+- max `1` trade/day
+- stop after first winning trade of the day
+
+```bash
+# Run the saved hybrid-search preset for the best current SBIN candidate.
+PYTHONPATH=src .venv/bin/python scripts/run_vwap_hybrid_preset.py \
+  --preset sbin_best \
+  --trades-output data/backtests/sbin_hybrid_preset_trades.csv \
+  --equity-output data/backtests/sbin_hybrid_preset_equity.csv
+```
+
+```bash
+# Run the saved hybrid-search preset for the best current ICICIBANK candidate.
+PYTHONPATH=src .venv/bin/python scripts/run_vwap_hybrid_preset.py \
+  --preset icici_best \
+  --trades-output data/backtests/icici_hybrid_preset_trades.csv \
+  --equity-output data/backtests/icici_hybrid_preset_equity.csv
+```
+
+Current saved presets in `run_vwap_hybrid_preset.py`:
+- `sbin_best`
+  - official SBIN preset now tracks the best 12-month candidate
+  - entry window `09:20-10:15`
+  - breakout candle must close above setup high
+  - chase cap `0.15%`
+  - impulse filter `0.58%`
+  - exit `rr` at `2R`
+  - pullback depth `0.15% -> 0.35%`
+  - preset default lookback `365` days
+- `icici_best`
+  - entry window `09:20-10:15`
+  - breakout candle must close above setup high
+  - chase cap `0.15%`
+  - impulse filter `0.4%`
+  - exit `trailing_low`
+  - pullback depth `0.10% -> 0.25%`
+
+Notes:
+- both presets use the unlocked hybrid logic: no EMA filter, no VWAP slope filter, no candle-direction rule
+- each preset carries its own default lookback window
+- `sbin_best` defaults to `365` days to reproduce the current 12-month winner
+- `icici_best` defaults to `180` days to reproduce the current 6-month hybrid-search window
+- use `--input` to override the CSV path if you want to run the same preset on another file
+
+```bash
 # Run the first 5-minute candle momentum breakout strategy on 1-minute data.
 PYTHONPATH=src .venv/bin/python scripts/run_backtest.py \
   --input data/market_data/features/feature_history_36m_1m_sbin.csv \
@@ -278,4 +351,15 @@ PYTHONPATH=src .venv/bin/python scripts/setup_research_workflow.py \
   --research-months 9 \
   --holdout-months 3 \
   --output-dir research_inside_bar
+```
+
+**setup_vwap_continuation_research.py**
+```bash
+# Create a VWAP continuation research split plus a strategy-specific runbook.
+PYTHONPATH=src .venv/bin/python scripts/setup_vwap_continuation_research.py \
+  --input data/market_data/features/feature_history_36m_5m_sbin.csv \
+  --strategy-name vwap_trend_continuation \
+  --research-months 9 \
+  --holdout-months 3 \
+  --output-dir research_vwap_trend_continuation_sbin
 ```

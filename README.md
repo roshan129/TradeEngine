@@ -232,6 +232,54 @@ For `inside_bar_breakout`, the current research baseline is:
 - stop taking new entries after the first winning trade of the day
 - volume and VWAP filters remain off unless enabled explicitly
 
+## Current VWAP Continuation Hybrid Presets
+
+The best candidates from the `2026-03-31` hybrid search are now saved as runnable presets in:
+
+- `scripts/run_vwap_hybrid_preset.py`
+
+Available presets:
+
+- `sbin_best`
+  - official SBIN preset now tracks the best 12-month winner
+  - entry window `09:20-10:15`
+  - breakout candle must close above setup high
+  - chase cap `0.15%`
+  - impulse filter `0.58%`
+  - exit `rr` at `2R`
+  - pullback depth `0.15% -> 0.35%`
+  - default lookback `365` days
+- `icici_best`
+  - entry window `09:20-10:15`
+  - breakout candle must close above setup high
+  - chase cap `0.15%`
+  - impulse filter `0.4%`
+  - exit `trailing_low`
+  - pullback depth `0.10% -> 0.25%`
+
+These presets use the unlocked continuation logic:
+
+- EMA filter removed
+- VWAP slope filter removed
+- candle-direction rule removed
+- pullback defined as dip from recent high
+
+The current `sbin_best` preset reproduces the best 12-month SBIN result found so far:
+
+- return `+0.8147%`
+- trades `9`
+- profit factor `1.6348`
+- max drawdown `0.8223%`
+
+Example:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/run_vwap_hybrid_preset.py \
+  --preset sbin_best \
+  --trades-output data/backtests/sbin_hybrid_preset_trades.csv \
+  --equity-output data/backtests/sbin_hybrid_preset_equity.csv
+```
+
 ## Export Multi-Month 1-Minute Feature History
 
 Fetch historical 1-minute candles in date chunks, stitch deterministically, clean with 1-minute interval validation, compute features, and add `ema9`:
@@ -396,6 +444,22 @@ OOS tuning (threshold + risk + stop):
 Create a research window, an untouched holdout window, and a markdown experiment log:
 
 - `PYTHONPATH=src .venv/bin/python scripts/setup_research_workflow.py --input data/market_data/features/feature_history_36m_5m.csv --strategy-name inside_bar_breakout --research-months 9 --holdout-months 3 --output-dir research_inside_bar`
+
+VWAP continuation now has a dedicated research scaffold with tuned liquid-name defaults:
+
+- `PYTHONPATH=src .venv/bin/python scripts/setup_vwap_continuation_research.py --input data/market_data/features/feature_history_36m_5m_sbin.csv --strategy-name vwap_trend_continuation --research-months 9 --holdout-months 3 --output-dir research_vwap_trend_continuation_sbin`
+
+Current tuned baseline for `vwap_trend_continuation`:
+
+- long-only
+- entry window `09:20-10:45`
+- exit mode `vwap_break`
+- minimum `5` candles above VWAP before setup
+- minimum VWAP distance `0.15%`
+- pullback size `0.15%`
+- fixed stop cap `0.30%`
+- max `1` trade/day
+- stop after first winning trade
 
 The script writes:
 

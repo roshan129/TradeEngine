@@ -8,10 +8,12 @@ from tradeengine.core.strategy import (
     BaselineEmaRsiStrategy,
     FirstFiveMinuteFakeBreakoutStrategy,
     FirstFiveMinuteCandleMomentumStrategy,
+    OpeningRangePullbackStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     RandomOpenDirectionStrategy,
     StrategyContext,
+    VwapTrendContinuationStrategy,
     VwapRsiMeanReversionStrategy,
 )
 
@@ -334,6 +336,98 @@ def test_backtester_runs_one_minute_scalp_strategy() -> None:
     assert len(result.trades) == 1
     trade = result.trades.iloc[0]
     assert trade["side"] == "LONG"
+
+
+def test_backtester_runs_opening_range_pullback_strategy() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-06T09:15:00+05:30"),
+                pd.Timestamp("2026-01-06T09:20:00+05:30"),
+                pd.Timestamp("2026-01-06T09:25:00+05:30"),
+                pd.Timestamp("2026-01-06T09:26:00+05:30"),
+                pd.Timestamp("2026-01-06T09:27:00+05:30"),
+                pd.Timestamp("2026-01-06T09:28:00+05:30"),
+            ],
+            "open": [100.0, 100.2, 100.4, 100.9, 100.8, 101.2],
+            "high": [100.2, 100.5, 100.6, 101.2, 100.95, 102.2],
+            "low": [99.8, 100.0, 100.2, 100.8, 100.55, 100.9],
+            "close": [100.0, 100.4, 100.5, 101.0, 100.7, 101.9],
+        }
+    )
+
+    config = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(
+        strategy=OpeningRangePullbackStrategy(
+            opening_start=pd.Timestamp("2026-01-06T09:15:00+05:30").time(),
+            opening_end=pd.Timestamp("2026-01-06T09:25:00+05:30").time(),
+            entry_end=pd.Timestamp("2026-01-06T11:00:00+05:30").time(),
+            risk_reward_multiple=1.5,
+            pullback_tolerance_pct=0.001,
+            allow_shorts=True,
+        ),
+        config=config,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "LONG"
+    assert trade["entry_timestamp"] == pd.Timestamp("2026-01-06T09:27:00+05:30")
+    assert trade["exit_reason"] == "STRATEGY_EXIT_LONG"
+    assert trade["net_pnl"] > 0
+
+
+def test_backtester_runs_vwap_trend_continuation_strategy() -> None:
+    df = pd.DataFrame(
+        {
+            "timestamp": [
+                pd.Timestamp("2026-01-07T09:20:00+05:30"),
+                pd.Timestamp("2026-01-07T09:25:00+05:30"),
+                pd.Timestamp("2026-01-07T09:30:00+05:30"),
+                pd.Timestamp("2026-01-07T09:35:00+05:30"),
+                pd.Timestamp("2026-01-07T09:40:00+05:30"),
+                pd.Timestamp("2026-01-07T09:45:00+05:30"),
+            ],
+            "open": [100.2, 100.72, 100.92, 101.1, 101.06, 101.12],
+            "high": [100.8, 101.0, 101.2, 101.14, 101.18, 101.45],
+            "low": [100.35, 100.55, 100.75, 101.02, 101.03, 101.08],
+            "close": [100.7, 100.9, 101.1, 101.05, 101.14, 101.35],
+            "vwap": [100.0, 100.1, 100.2, 100.4, 100.5, 100.6],
+        }
+    )
+
+    config = BacktestConfig(
+        initial_capital=100_000.0,
+        risk_per_trade=0.01,
+        slippage_pct=0.0,
+        brokerage_fixed=0.0,
+        brokerage_pct=0.0,
+        allow_shorts=True,
+        force_end_of_day_exit=False,
+    )
+    result = Backtester(
+        strategy=VwapTrendContinuationStrategy(
+            pullback_lookback_bars=3,
+            exit_mode="rr",
+            risk_reward_multiple=2.0,
+        ),
+        config=config,
+    ).run(df)
+
+    assert len(result.trades) == 1
+    trade = result.trades.iloc[0]
+    assert trade["side"] == "LONG"
+    assert trade["entry_timestamp"] == pd.Timestamp("2026-01-07T09:40:00+05:30")
+    assert trade["exit_reason"] == "STRATEGY_EXIT_LONG"
+    assert trade["net_pnl"] > 0
 
 
 def test_backtester_honors_max_entries_per_day_limit() -> None:

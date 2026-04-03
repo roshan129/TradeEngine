@@ -13,10 +13,13 @@ from tradeengine.core.strategy import (
     FirstFiveMinuteFakeBreakoutStrategy,
     FirstFiveMinuteCandleMomentumStrategy,
     InsideBarBreakoutStrategy,
+    InsideBarFakeBreakoutReversalStrategy,
     MLSignalStrategy,
     OpeningRangeBreakoutStrategy,
+    OpeningRangePullbackStrategy,
     RandomOpenDirectionStrategy,
     SupportResistanceReversalStrategy,
+    VwapTrendContinuationStrategy,
     OneMinuteVwapEma9IciciFocusedStrategy,
     OneMinuteVwapEma9ScalpStrategy,
     Strategy,
@@ -59,11 +62,14 @@ def parse_args() -> argparse.Namespace:
         choices=[
             "ema_rsi",
             "vwap_rsi_reversion",
+            "vwap_trend_continuation",
             "ml_signal",
             "opening_range_breakout",
+            "opening_range_pullback",
             "first_five_minute_momentum",
             "first_five_minute_fake_breakout",
             "inside_bar_breakout",
+            "inside_bar_fake_breakout_reversal",
             "random_open_direction",
             "support_resistance_reversal",
             "one_minute_vwap_ema9_scalp",
@@ -167,6 +173,136 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.004,
         help="Minimum BB width for opening_range_breakout when volatility filter enabled",
+    )
+    parser.add_argument(
+        "--orb-pullback-opening-start",
+        default="09:15",
+        help="Opening range start for opening_range_pullback in HH:MM (default: 09:15)",
+    )
+    parser.add_argument(
+        "--orb-pullback-opening-end",
+        default="09:25",
+        help="Opening range end for opening_range_pullback in HH:MM (default: 09:25)",
+    )
+    parser.add_argument(
+        "--orb-pullback-entry-end",
+        default="11:00",
+        help="Last time to enter opening_range_pullback in HH:MM (default: 11:00)",
+    )
+    parser.add_argument(
+        "--orb-pullback-session-exit",
+        default="15:15",
+        help="Final exit time for opening_range_pullback in HH:MM (default: 15:15)",
+    )
+    parser.add_argument(
+        "--orb-pullback-rr-multiple",
+        type=float,
+        default=1.5,
+        help="Risk-reward multiple for opening_range_pullback (default: 1.5)",
+    )
+    parser.add_argument(
+        "--orb-pullback-tolerance-pct",
+        type=float,
+        default=0.001,
+        help="Breakout-level retest tolerance as decimal pct for opening_range_pullback (default: 0.001 = 0.1%%)",
+    )
+    parser.add_argument(
+        "--vwap-trend-entry-start",
+        default="09:20",
+        help="Entry window start for vwap_trend_continuation in HH:MM (default: 09:20)",
+    )
+    parser.add_argument(
+        "--vwap-trend-entry-end",
+        default="10:45",
+        help="Entry window end for vwap_trend_continuation in HH:MM (default: 10:45)",
+    )
+    parser.add_argument(
+        "--vwap-trend-session-exit",
+        default="15:15",
+        help="Final exit time for vwap_trend_continuation in HH:MM (default: 15:15)",
+    )
+    parser.add_argument(
+        "--vwap-trend-rr-multiple",
+        type=float,
+        default=2.0,
+        help="Risk-reward multiple for vwap_trend_continuation when --vwap-trend-exit-mode=rr (default: 2.0)",
+    )
+    parser.add_argument(
+        "--vwap-trend-exit-mode",
+        choices=["rr", "vwap_break", "trailing_low"],
+        default="vwap_break",
+        help="Exit logic for vwap_trend_continuation (default: vwap_break)",
+    )
+    parser.add_argument(
+        "--vwap-trend-min-candles-above-vwap",
+        type=int,
+        default=5,
+        help="Minimum consecutive prior candles that must hold above VWAP before a pullback setup is allowed (default: 5)",
+    )
+    parser.add_argument(
+        "--vwap-trend-min-distance-above-vwap-pct",
+        type=float,
+        default=0.0015,
+        help="Minimum close distance above VWAP required for strength filter in decimal pct (default: 0.0015 = 0.15%%)",
+    )
+    parser.add_argument(
+        "--vwap-trend-pullback-lookback-bars",
+        type=int,
+        default=5,
+        help="Lookback bars used to measure pullback from the recent swing high (default: 5)",
+    )
+    parser.add_argument(
+        "--vwap-trend-min-pullback-pct",
+        type=float,
+        default=0.0015,
+        help="Minimum pullback size from recent swing high in decimal pct (default: 0.0015 = 0.15%%)",
+    )
+    parser.add_argument(
+        "--vwap-trend-max-pullback-pct",
+        type=float,
+        default=0.0015,
+        help="Maximum pullback size from recent swing high in decimal pct (default: 0.0015 = 0.15%%)",
+    )
+    parser.add_argument(
+        "--vwap-trend-fixed-stop-loss-pct",
+        type=float,
+        default=0.003,
+        help="Fixed stop-loss cap as decimal pct below entry for vwap_trend_continuation (default: 0.003 = 0.3%%)",
+    )
+    parser.add_argument(
+        "--vwap-trend-pullback-low-buffer-pct",
+        type=float,
+        default=0.0,
+        help="Extra buffer below the pullback low when computing stop-loss in decimal pct (default: 0.0)",
+    )
+    parser.add_argument(
+        "--vwap-trend-min-vwap-slope-pct",
+        type=float,
+        default=0.0001,
+        help="Minimum per-candle VWAP slope magnitude required to avoid flat VWAP conditions (default: 0.0001 = 0.01%%)",
+    )
+    parser.add_argument(
+        "--vwap-trend-vwap-slope-lookback-bars",
+        type=int,
+        default=1,
+        help="Lookback bars used to measure VWAP slope for vwap_trend_continuation (default: 1)",
+    )
+    parser.add_argument(
+        "--vwap-trend-use-ema-filter",
+        action="store_true",
+        help="Require EMA20 > EMA50 for long VWAP trend entries",
+    )
+    parser.add_argument(
+        "--vwap-trend-min-atr-pct",
+        type=float,
+        default=0.0,
+        help="Minimum ATR/close regime filter for vwap_trend_continuation (default: 0.0 disables)",
+    )
+    parser.add_argument(
+        "--vwap-trend-min-bb-width",
+        type=float,
+        default=0.0,
+        help="Minimum Bollinger-band width regime filter for vwap_trend_continuation (default: 0.0 disables)",
     )
     parser.add_argument(
         "--first-candle-breakout-start",
@@ -283,10 +419,21 @@ def parse_args() -> argparse.Namespace:
         help="Entry window end for inside_bar_breakout in HH:MM (default: 15:15)",
     )
     parser.add_argument(
+        "--inside-session-exit",
+        default="15:15",
+        help="Final exit time for open inside_bar_breakout positions in HH:MM (default: 15:15)",
+    )
+    parser.add_argument(
         "--inside-max-setup-candles",
         type=int,
-        default=5,
-        help="Max candles to wait for breakout after inside bar (default: 5)",
+        default=0,
+        help="Max candles to wait for breakout after inside bar (default: 0 = disabled)",
+    )
+    parser.add_argument(
+        "--inside-max-holding-candles-without-profit",
+        type=int,
+        default=0,
+        help="Exit inside_bar_breakout trades after this many candles if still not in profit (default: 0 disables)",
     )
     parser.add_argument(
         "--inside-min-range-pct",
@@ -295,9 +442,21 @@ def parse_args() -> argparse.Namespace:
         help="Minimum mother bar range as pct of close (default: 0.0035 = 0.35%)",
     )
     parser.add_argument(
+        "--inside-max-stop-loss-pct",
+        type=float,
+        default=0.0,
+        help="Maximum stop-loss distance from entry for inside_bar_breakout as decimal pct (default: 0.0 disables)",
+    )
+    parser.add_argument(
+        "--inside-min-distance-from-open",
+        type=float,
+        default=0.0,
+        help="Minimum directional distance from session open required for entry (default: 0.0 disables)",
+    )
+    parser.add_argument(
         "--inside-use-volume-filter",
         action="store_true",
-        help="Require breakout candle volume > rolling volume average",
+        help="Require breakout candle volume > rolling volume average (default: off)",
     )
     parser.add_argument(
         "--inside-use-vwap-filter",
@@ -342,6 +501,39 @@ def parse_args() -> argparse.Namespace:
         choices=["both", "long", "short"],
         default="both",
         help="Directional entries allowed for inside_bar_breakout (default: both)",
+    )
+    parser.add_argument(
+        "--inside-fake-entry-start",
+        default="09:15",
+        help="Entry window start for inside_bar_fake_breakout_reversal in HH:MM (default: 09:15)",
+    )
+    parser.add_argument(
+        "--inside-fake-entry-end",
+        default="15:15",
+        help="Entry window end for inside_bar_fake_breakout_reversal in HH:MM (default: 15:15)",
+    )
+    parser.add_argument(
+        "--inside-fake-session-exit",
+        default="15:15",
+        help="Final exit time for open inside_bar_fake_breakout_reversal positions in HH:MM (default: 15:15)",
+    )
+    parser.add_argument(
+        "--inside-fake-rr-multiple",
+        type=float,
+        default=1.0,
+        help="Risk-reward multiple for inside_bar_fake_breakout_reversal (default: 1.0)",
+    )
+    parser.add_argument(
+        "--inside-fake-max-stop-loss-pct",
+        type=float,
+        default=0.006,
+        help="Maximum stop-loss distance from entry for inside_bar_fake_breakout_reversal as decimal pct (default: 0.006 = 0.6%%)",
+    )
+    parser.add_argument(
+        "--inside-fake-trade-direction",
+        choices=["both", "long", "short"],
+        default="both",
+        help="Directional entries allowed for inside_bar_fake_breakout_reversal (default: both)",
     )
     parser.add_argument(
         "--random-entry-time",
@@ -732,6 +924,28 @@ def main() -> int:
             allow_shorts=short_enabled,
             reverse_signals=args.reverse_signals,
         )
+    elif args.strategy == "vwap_trend_continuation":
+        strategy = VwapTrendContinuationStrategy(
+            entry_session_start=_parse_hhmm(args.vwap_trend_entry_start),
+            entry_session_end=_parse_hhmm(args.vwap_trend_entry_end),
+            session_exit_time=_parse_hhmm(args.vwap_trend_session_exit),
+            exit_mode=args.vwap_trend_exit_mode,
+            risk_reward_multiple=args.vwap_trend_rr_multiple,
+            min_candles_above_vwap=max(1, args.vwap_trend_min_candles_above_vwap),
+            min_distance_above_vwap_pct=args.vwap_trend_min_distance_above_vwap_pct,
+            pullback_lookback_bars=max(1, args.vwap_trend_pullback_lookback_bars),
+            min_pullback_size_pct=args.vwap_trend_min_pullback_pct,
+            max_pullback_size_pct=args.vwap_trend_max_pullback_pct,
+            fixed_stop_loss_pct=args.vwap_trend_fixed_stop_loss_pct,
+            pullback_low_buffer_pct=args.vwap_trend_pullback_low_buffer_pct,
+            vwap_slope_lookback_bars=max(1, args.vwap_trend_vwap_slope_lookback_bars),
+            min_vwap_slope_pct=args.vwap_trend_min_vwap_slope_pct,
+            min_atr_pct=args.vwap_trend_min_atr_pct,
+            min_bb_width=args.vwap_trend_min_bb_width,
+            use_ema_trend_filter=args.vwap_trend_use_ema_filter,
+            allow_shorts=False,
+            reverse_signals=args.reverse_signals,
+        )
     elif args.strategy == "ml_signal":
         strategy = MLSignalStrategy(
             allow_shorts=short_enabled,
@@ -752,6 +966,17 @@ def main() -> int:
             use_volatility_filter=args.orb_use_volatility_filter,
             min_atr_pct=args.orb_min_atr_pct,
             min_bb_width=args.orb_min_bb_width,
+        )
+    elif args.strategy == "opening_range_pullback":
+        strategy = OpeningRangePullbackStrategy(
+            opening_start=_parse_hhmm(args.orb_pullback_opening_start),
+            opening_end=_parse_hhmm(args.orb_pullback_opening_end),
+            entry_end=_parse_hhmm(args.orb_pullback_entry_end),
+            session_exit_time=_parse_hhmm(args.orb_pullback_session_exit),
+            risk_reward_multiple=args.orb_pullback_rr_multiple,
+            pullback_tolerance_pct=args.orb_pullback_tolerance_pct,
+            allow_shorts=short_enabled,
+            reverse_signals=args.reverse_signals,
         )
     elif args.strategy == "first_five_minute_momentum":
         strategy = FirstFiveMinuteCandleMomentumStrategy(
@@ -800,8 +1025,14 @@ def main() -> int:
         strategy = InsideBarBreakoutStrategy(
             entry_session_start=_parse_hhmm(args.inside_entry_start),
             entry_session_end=_parse_hhmm(args.inside_entry_end),
-            max_setup_candles=max(1, args.inside_max_setup_candles),
+            session_exit_time=_parse_hhmm(args.inside_session_exit),
+            max_setup_candles=max(0, args.inside_max_setup_candles),
+            max_holding_candles_without_profit=max(
+                0, args.inside_max_holding_candles_without_profit
+            ),
             min_mother_range_pct=args.inside_min_range_pct,
+            max_stop_loss_pct=args.inside_max_stop_loss_pct,
+            min_distance_from_open=args.inside_min_distance_from_open,
             use_volume_filter=args.inside_use_volume_filter,
             use_vwap_trend_filter=args.inside_use_vwap_filter,
             use_ema_trend_filter=args.inside_use_ema_filter,
@@ -812,6 +1043,19 @@ def main() -> int:
             probability_threshold=args.inside_prob_threshold,
             allow_longs=inside_allow_longs,
             allow_shorts=inside_allow_shorts and short_enabled,
+            reverse_signals=args.reverse_signals,
+        )
+    elif args.strategy == "inside_bar_fake_breakout_reversal":
+        inside_fake_allow_longs = args.inside_fake_trade_direction in {"both", "long"}
+        inside_fake_allow_shorts = args.inside_fake_trade_direction in {"both", "short"}
+        strategy = InsideBarFakeBreakoutReversalStrategy(
+            entry_session_start=_parse_hhmm(args.inside_fake_entry_start),
+            entry_session_end=_parse_hhmm(args.inside_fake_entry_end),
+            session_exit_time=_parse_hhmm(args.inside_fake_session_exit),
+            risk_reward_multiple=args.inside_fake_rr_multiple,
+            max_stop_loss_pct=args.inside_fake_max_stop_loss_pct,
+            allow_longs=inside_fake_allow_longs,
+            allow_shorts=inside_fake_allow_shorts and short_enabled,
             reverse_signals=args.reverse_signals,
         )
     elif args.strategy == "random_open_direction":
@@ -866,18 +1110,26 @@ def main() -> int:
     max_entries = args.max_entries_per_day if args.max_entries_per_day > 0 else None
     if args.strategy == "opening_range_breakout" and max_entries is None:
         max_entries = 3
+    if args.strategy == "opening_range_pullback" and max_entries is None:
+        max_entries = 1
+    if args.strategy == "vwap_trend_continuation" and max_entries is None:
+        max_entries = 1
     if args.strategy == "first_five_minute_momentum" and max_entries is None:
         max_entries = 1
     if args.strategy == "first_five_minute_fake_breakout" and max_entries is None:
         max_entries = 1
     if args.strategy == "support_resistance_reversal" and max_entries is None:
         max_entries = 10
-    if args.strategy == "inside_bar_breakout" and max_entries is None:
+    if args.strategy in {"inside_bar_breakout", "inside_bar_fake_breakout_reversal"} and max_entries is None:
         max_entries = 2
 
     stop_after_first_win = args.stop_after_first_win_per_day
     if stop_after_first_win is None:
-        stop_after_first_win = args.strategy == "inside_bar_breakout"
+        stop_after_first_win = args.strategy in {
+            "inside_bar_breakout",
+            "inside_bar_fake_breakout_reversal",
+            "vwap_trend_continuation",
+        }
     config = BacktestConfig(
         initial_capital=args.initial_capital,
         risk_per_trade=args.risk_per_trade,
